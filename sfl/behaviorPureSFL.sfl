@@ -1,0 +1,538 @@
+### This file is an experimental behavior specification which formulates the maximum amount
+### of team behavior in SFL. This means, even fluid homepositions and formations are described in SFL.
+### formation.conf is practically ignored this way.
+### This behavior is not a strong opponent now...play around with the rules to optimize it.
+### 
+### Trying to avoid priorities. Thus all priorities are 1. Ordering is important now!
+###
+### This rule makes sure that all positions are set before-kickoff:
+  <1>
+  (advice
+   (6000
+        (playm bko)
+    (do our {2}  (pos ("start2")  70))
+    (do our {3}  (pos ("start3")  70))
+    (do our {4}  (pos ("start4")  70))
+    (do our {5}  (pos ("start5")  70))
+    (do our {6}  (pos ("start6")  70))
+    (do our {7}  (pos ("start7")  70))
+    (do our {8}  (pos ("start8")  70))
+    (do our {9}  (pos ("start9")  70))
+    (do our {10} (pos ("start10") 70))
+    (do our {11} (pos ("start11") 70))
+   )
+  )
+### For kick-offs, free-kicks, etc.:
+<1>
+(advice
+  (6000
+    (or
+      (playm ko_our)
+      (playm ki_our)
+      (playm fk_our)
+      (playm ck_our)
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "their_penalty" {pd})
+    )
+  )
+)
+####################### Offensive (using right/bottom wing)
+#### field is divided into 5 parts:
+#### 1/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner our {X})
+            (bpos (reg "our_bottom_corner" "our_penalty"))
+        )
+        (do our {X} (bto "our_bottom" {pd}))
+    )
+)
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner our {X})
+            (bpos "our_top_corner")
+        )
+        (do our {X} (bto "our_middle" {pd}))
+    )
+)
+### 2/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner our {X})
+            (bpos (reg "our_bottom" "our_middle"))
+        )
+        (do our {X} (bto "bottom" {pd}))
+    )
+)
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner our {X})
+            (bpos "our_top")
+        )
+        (do our {X} (bto "middle" {pd}))
+    )
+)
+### 3/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner our {X})
+            (bpos (reg "bottom" "middle"))
+        )
+        (do our {X} (bto "their_bottom" {pd}))
+    )
+)
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner our {X})
+            (bpos "top")
+        )
+        (do our {X} (bto "their_middle" {pd}))
+    )
+)
+### 4/5 and 5/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner our {X})
+            (bpos (reg "their_top" "their_middle" "their_bottom" "their_top_corner" "their_bottom_corner" "their_penalty"))
+        )
+        (do our {X} (bto "their_penalty" {pds}))
+    )
+)
+####################### Defensive
+# If the closest player to the ball can intercept it, he does so.
+<1>
+(advice
+  (6000
+    (and
+      (not
+        (bowner our {0})
+      )
+      (ballInterceptable
+        our { (closestPlayerToBall our) }
+      )
+    )
+    (do
+      our { (closestPlayerToBall our) }
+      (interceptball 100)
+    )
+  )
+)
+# If the ball is in the homerange (15m here) of a player, and close to the ball are only
+# 2 mates, it goes to the ball.
+<1>
+(advice
+ (6000
+  (and
+   (not
+     (bowner our {0})
+   )
+   (bpos (arc ("heimpos2") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {2} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos3") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {3} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos4") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {4} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos5") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {5} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos6") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {6} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos7") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {7} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos8") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {8} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos9") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {9} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos10") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {10} (pos (pt ball) 100))
+ )
+)
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (bpos (arc ("heimpos11") 0 15  0 360))
+   (ppos our {0} 0 2 (arc (pt ball) 0 5 0 360))
+  )
+  (do our {11} (pos (pt ball) 100))
+ )
+)
+# If the agent's best cover partner is in the back part, the closest player will position itself
+# between it and the goal.
+# Note: Parameters TEAM and UNUM are ignored for bestDeckPartner. It will be evaluated for
+# the agent that evaluates the rule.
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (ppos opp {(bestDeckPartner our {X})} 1 1
+    (quad (pt -52.5 -34) (pt -52.5 34) (pt -35 -34) (pt -35 34))
+   )
+  )
+  (do
+   our { (closestPlayerToPlayer our opp {(bestDeckPartner our {X})}) }
+   (markl (pt -52.5 0) {(bestDeckPartner our {X})})
+  )
+ )
+)
+# If its best cover partner is more to the front, the closest player will position itself
+# between opponent nad ball.
+<1>
+(advice
+ (6000
+  (and
+   (not
+    (bowner our {0})
+   )
+   (not
+    (ppos
+     opp { (bestDeckPartner our {X}) } 1 1
+     (quad (pt -52.5 -34) (pt -52.5 34) (pt -35 -34) (pt -35 34))
+    )
+   )
+  )
+  (do our { (closestPlayerToPlayer our opp {(bestDeckPartner our {X})}) }
+   (markl (pt opp {(bestDeckPartner our {X})}))
+  )
+ )
+)
+# Defensive:
+# Depending on the position of the ball the agents will position themselves in the specified
+# regions:
+#### 1/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner opp {0})
+            (bpos (reg "their_top_corner" "their_penalty"))
+        )
+		(do our {2 3 4} (pos "our_top" 70))
+		(do our {5 6} (pos "top" 70))
+		(do our {7 8 9} (pos "their_top" 70))
+		(do our {10 11} (pos "their_top_corner" 70))
+    )
+)
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner opp {0})
+            (bpos "their_bottom_corner")
+        )
+		(do our {2 3 4} (pos "our_middle" 70))
+		(do our {5 6} (pos "middle" 70))
+		(do our {7 8} (pos "their_middle" 70))
+		(do our {9 10} (pos "their_bottom_corner" 70))
+		(do our {11} (pos "their_penalty" 70))
+    )
+)
+### 2/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner opp {0})
+            (bpos (reg "their_top" "their_middle"))
+        )
+		(do our {3 4 5} (pos "our_top" 70))
+		(do our {6 7 8} (pos "top" 70))
+		(do our {9 10} (pos "their_top" 70))
+		(do our {11} (pos "their_middle" 70))
+    )
+)
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner opp {0})
+            (bpos "their_bottom")
+        )
+		(do our {3 4 5} (pos "our_middle" 70))
+		(do our {6 7 8} (pos "middle" 70))
+		(do our {9 10} (pos "their_bottom" 70))
+		(do our {11} (pos "their_penalty" 70))
+    )
+)
+### 3/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner opp {0})
+            (bpos (reg "top" "middle"))
+        )
+		(do our {2 3} (pos "our_penalty" 70))
+		(do our {4 5 6} (pos "our_top" 70))
+		(do our {7 8} (pos "top" 70))
+		(do our {9} (pos "middle" 70))
+		(do our {10 11} (pos "their_middle" 70))
+    )
+)
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner opp {0})
+            (bpos "bottom")
+        )
+		(do our {2 3} (pos "our_penalty" 70))
+		(do our {4 5 6} (pos "our_middle" 70))
+		(do our {7 8 9} (pos "bottom" 70))
+		(do our {10 11} (pos "their_bottom" 70))
+    )
+)
+### 4/5 and 5/5
+<1>
+(advice
+    (9999
+        (and
+            (playm play_on)
+            (bowner opp {0})
+            (bpos (reg "our_top" "our_middle" "our_bottom" "our_top_corner" "our_bottom_corner" "our_penalty"))
+        )
+		(do our {2 3 4} (pos "our_penalty" 70))
+		(do our {4 5} (pos "our_top" 70))
+		(do our {6 7} (pos "our_middle" 70))
+		(do our {8 9} (pos "our_bottom" 70))
+		(do our {10 11} (pos "middle" 70))
+    )
+)
+#
+####################### Misc
+## Default-rule: go to homeposition.
+## Note: homepositions are being constantly updated depedning on the ballposition (see below in
+## the definition part)
+  <1>
+  (advice
+   (6000
+    (true)
+    (do our {2}  (pos ("heimpos2")  70))
+    (do our {3}  (pos ("heimpos3")  70))
+    (do our {4}  (pos ("heimpos4")  70))
+    (do our {5}  (pos ("heimpos5")  70))
+    (do our {6}  (pos ("heimpos6")  70))
+    (do our {7}  (pos ("heimpos7")  70))
+    (do our {8}  (pos ("heimpos8")  70))
+    (do our {9}  (pos ("heimpos9")  70))
+    (do our {10} (pos ("heimpos10") 70))
+    (do our {11} (pos ("heimpos11") 70))
+   )
+  )
+
+
+
+
+####################### Definitions
+#### Constant regions on the field:
+<1> (define (definer "our_top_corner"    (quad (pt -52.5 -34) (pt -36 -34) (pt -36 -20) (pt -52.5 -20))))
+<1> (define (definer "our_penalty"       (quad (pt -52.5 -20) (pt -36 -20) (pt -36 20)  (pt -52.5 20))))
+<1> (define (definer "our_bottom_corner" (quad (pt -52.5 20)  (pt -36 20)  (pt -36 34)  (pt -52.5 34))))
+#
+<1> (define (definer "our_top"    (quad (pt -36 -34) (pt -12 -34) (pt -12 -20) (pt -36 -20))))
+<1> (define (definer "our_middle" (quad (pt -36 -20) (pt -12 -20) (pt -12 20) (pt -36 20))))
+<1> (define (definer "our_bottom" (quad (pt -36 20)  (pt -12 20) (pt -12 34) (pt -36 34))))
+#
+<1> (define (definer "top"    (quad (pt -12 -34) (pt 12 -34) (pt 12 -20) (pt -12 -20))))
+<1> (define (definer "middle" (quad (pt -12 -20) (pt 12 -20) (pt 12 20)  (pt -12 20))))
+<1> (define (definer "bottom" (quad (pt -12 20)  (pt 12 20)  (pt 12 34)  (pt -12 34))))
+#
+<1> (define (definer "their_top"    (quad (pt 12 -34) (pt 36 -34) (pt 36 -20) (pt 12 -20))))
+<1> (define (definer "their_middle" (quad (pt 12 -20) (pt 36 -20) (pt 36 20)  (pt 12 20))))
+<1> (define (definer "their_bottom"    (quad (pt 12 20)  (pt 36 20)  (pt 36 34)  (pt 12 34))))
+#
+<1> (define (definer "their_top_corner"    (quad (pt 36 -34) (pt 52.5 -34) (pt 52.5 -20) (pt 36 -20))))
+<1> (define (definer "their_penalty"       (quad (pt 36 -20) (pt 52.5 -20) (pt 52.5 20)  (pt 36 20))))
+<1> (define (definer "their_bottom_corner" (quad (pt 36 20)  (pt 52.5 20)  (pt 52.5 34)  (pt 36 34))))
+#
+#
+#
+# Positions before kickoff (4-4-2):
+  <1> (define (definep "start2"  (pt -25 -25)))
+  <1> (define (definep "start3"  (pt -25 -18)))
+  <1> (define (definep "start4"  (pt -25  -8)))
+  <1> (define (definep "start5"  (pt -25   5)))
+  <1> (define (definep "start6"  (pt -12 -20)))
+  <1> (define (definep "start7"  (pt -12 -10)))
+  <1> (define (definep "start8"  (pt -12   0)))
+  <1> (define (definep "start9"  (pt -12   9)))
+  <1> (define (definep "start10" (pt -2  -10)))
+  <1> (define (definep "start11" (pt -2    5)))
+#
+# Home-Positions for formations (based on the 4-4-2 in formation.conf)
+# The positions are modified depending on the actual ballposition similar to
+# the function adjustHomePos in MemFormation.C
+# X * .8 + BallX * 0.5524 + BallX * 0.019 * (1-abs(X)*0.019) *10
+# X * .8 + BallX * 0.5524 + BallX * 0.19  * (1-abs(X)*0.019)
+# X * .8 + BallX * 0.5524 + BallX * (0.19 - ( abs(X) * 0.00361))
+#
+  <1> (define (definep "heimpos2"
+        (plus
+            (plus (mult (pt -25 -25) (pt 0.8 1))
+                  (mult (pt ball) (pt 0.5524 0)))
+            (mult
+                  (pt ball)
+                  (plus
+                        (pt 0.19 0)
+                        (mult (pt -25 25) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos3"
+        (plus (plus (mult (pt -25 -15) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt -25 15) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos4"
+        (plus (plus (mult (pt -25 -10) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt -25 10) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos5"
+        (plus (plus (mult (pt -25 0) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt -25 0) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos6"
+        (plus (plus (mult (pt -5 -20) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt -5 20) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos7"
+        (plus (plus (mult (pt -5 -11) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt -5 11) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos8"
+        (plus (plus (mult (pt -5 -1) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt -5 1) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos9"
+        (plus (plus (mult (pt -5 9) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt -5 -9) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos10"
+        (plus (plus (mult (pt 18 0) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt 18 0) (pt 0.00361 0)))))))
+  <1> (define (definep "heimpos11"
+        (plus (plus (mult (pt 18 14) (pt 0.8 1))
+        (mult (pt ball) (pt 0.5524 0)))
+        (mult (pt ball) (plus (pt 0.19 0) (mult (pt 18 -14) (pt 0.00361 0)))))))
+#

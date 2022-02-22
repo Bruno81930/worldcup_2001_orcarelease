@@ -1,0 +1,125 @@
+CXX		= g++ -pg
+
+EXEC_ORCA	=	orcaclient
+
+CCLIBS_default	= -lm
+CCLIBS_SunOS_4	= -lm
+CCLIBS_SunOS_5	= -lm -L/usr/ucblib -lucb -lsocket -lnsl
+CCLIBS_OSF1		= -lm
+CCLIBS_NEWS		= -lm
+CCLIBS_IRIX		= -lm
+CCLIBS_Linux	= -lm -lbsd-compat
+CXXLIBS			= $(CCLIBS_Linux)
+#CXXLIBS			= $(CCLIBS_SunOS_4)
+#CXXLIBS			= $(CCLIBS_SunOS_5)
+
+OSFLAGS_default	=
+OSFLAGS_SunOS_4	= -DSunOS4
+OSFLAGS_SunOS_5	= -DSolaris -DMEMSET
+OSFLAGS_OSF1	= -DOSF1
+OSFLAGS_NEWS	= -DNewsOS
+OSFLAGS_IRIX	= -DIRIX -D_BSD_SIGNALS
+OSFLAGS_Linux	= -DLinux  
+CXXFLAGS	=  -g -Wall $(OSFLAGS_Linux)
+#CXXFLAGS	= -Wall -g $(OSFLAGS_Linux)
+#CXXFLAGS	= -Wall $(OSFLAGS_SunOS_4)
+#CXXFLAGS	= -Wall -pedantic -fomit-frame-pointer -O3 $(OSFLAGS_SunOS_5)
+
+CXXFLAGS	+= -g
+#CXXFLAGS	+= -DNO_ACTION_LOG
+CXXFLAGS	+= -DDEBUG
+CXXFLAGS 	+= -DRELEASE_VERSION
+OPTMAKEFLAGS =
+CXXINCLUDE = -I. -I.. -I../../.. -Ibehavior/n++ -Ibehavior/train -Isfl
+
+all: $(EXEC) quicksleep
+
+OFILES =	netif.o client.o parse.o utils.o geometry.o
+OFILES +=	MemOption.o MemPlayer.o MemPosition.o MemAction.o MemFormation.o Memory.o
+OFILES +=	behave.o kick.o dribble.o test.o
+
+OFILES +=  sfl/clangparser.o
+OFILES +=  sfl/coach_lang.tab.o
+OFILES +=  sfl/garbage.o
+OFILES +=  sfl/coach_lang.o
+OFILES +=  sfl/coach_lang_comp.o
+OFILES +=  sfl/lex.yy.o
+OFILES +=  sfl/region.o
+OFILES +=  sfl/SFLShierarchy.o
+OFILES +=  sfl/effector.o
+OFILES +=  sfl/SFLS.o
+
+SRCS	=	$(OFILES:%.o=%.C)
+
+SUBDIRS = behavior communication
+BEHAVIOR_OFILES=
+
+BUILDPATH = built
+export BUILDPATH
+
+%.o : %.C %.h
+	$(CXX) -c $(CXXFLAGS) $(CXXINCLUDE) $<
+
+all:
+	cd sfl; make
+	make $(EXEC_ORCA)
+
+#sfl: should pass parameter -DSFL to behavior/Makefile 
+# otherwise like all:
+
+sfls:
+	cd sfl; make
+#	OPTMAKEFLAGS += -DSFL   // doesn't work yet
+	make $(EXEC_ORCA)
+
+tgz: all
+	tar -hczf ballbyters.tgz orcaclient quicksleep server.conf formation.conf client.conf automatic_start orca.conf pppoints
+
+server_tgz:
+	cd coach/online; make; cd ../..
+	cd server; cp ../coach/online/onlinecoach .; tar -hczf ../sserver.tgz onlinecoach player.conf server.conf soccerserver
+
+$(EXEC_ORCA) ::
+#	cp behavior/orcabehavior.h behavior/orcabehavior.h
+	$(MAKE) $(OFILES)
+	for X in $(SUBDIRS) ; do \
+        cd $$X; $(MAKE) $(OPTMAKEFLAGS); cd .. ; done
+	$(MAKE) bind_orca
+
+bind_orca::
+	$(CXX) -g $^ -o $(EXEC_ORCA)\
+	$(shell find |grep .o|grep $(BUILDPATH)/) $(OFILES) \
+	$(shell find |grep [.]o|grep n++/) $(CXXLIBS) -static
+
+
+pureclient : $(OFILES)
+	purify -collector=/usr/local/lib/gcc-lib/sparc-sun-sunos4.1.3_U1/2.7.2/ld $(CXX) -g $^ -o $@ $(CXXLIBS)
+
+cln:
+	echo cleaning up....
+	/bin/rm $(OFILES) $(EXEC_ORCA) quicksleep pureclient core  \
+	$(shell find |grep [.]o|grep $(BUILDPATH)/) \
+	$(shell find |grep [.]o|grep n++/) 
+
+
+clean:
+	echo cleaning up....
+	/bin/rm -f $(OFILES) $(EXEC_ANDREAS) $(EXEC_ORCA) $(shell find -mindepth 2|grep [\.]o|grep -v [\.]o.)
+	-/bin/rm Makefile.depend
+	$(MAKE) clean_log
+
+clean_log:
+	echo cleaning up Logfiles ...
+	cd Logfiles ; /bin/rm $(shell ls Logfiles/ |grep -v CVS) ; cd ..
+
+depend:
+	$(RM) $(DEPEND)
+	$(CXX) -M $(CXXFLAGS) $(SRCS) >> $(DEPEND)
+
+DEPEND = Makefile.depend
+ifeq ($(wildcard $(DEPEND)),$(DEPEND))
+include $(DEPEND)
+endif
+
+quicksleep: quicksleep.C
+	gcc -o quicksleep quicksleep.C

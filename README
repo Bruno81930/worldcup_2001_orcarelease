@@ -1,0 +1,74 @@
+
+Source code release of the Dirty Dozen team and online coach
+------------------------------------------------------------
+developed by the ORCA (Osnabrück RoboCup Agents) project
+(also known as the Osna BallByters)
+
+
+Acknowledgments:
+
+Our player agents are based on the public parts of the source-code of the CMU-99 team.
+CMUnited-99 source code is copyright from Peter Stone, Patrick Riley and Manuela Veloso
+and can be downloaded from http://www.cs.cmu.edu/~pstone/RoboCup/CMUnited99-sim.html.
+CMU's README is now named README_CMU and will give you a good overview about the
+architecture.
+For our additions and SFL-architecture please refer to docu.ps.gz
+
+
+
+
+Compiling:
+
+Some effort was put into creating an elegant Makefile. Simply typing "make" in the
+orca-directory should compile the code on several platforms.
+To compile the logfile-analyzer tool and the online coach, type "make" in the
+orca/coach directory.
+
+
+
+
+Running the team:
+
+There are several startscripts which comment on the parameters for the players.
+Note that there have to exist several files in the orca-directory:
+server.conf, player.conf, client.conf
+formation.conf
+pppoints
+orca.conf (this one is identical to orcaconf/basic_w_all_communication.conf)
+You can copy any of the .conf-files in orcaconf to orca.conf
+Adding -sfls to the commandline will make the agent run using SFLS (which is
+a prerequisite for being compatible to online coach messages)
+
+
+
+Running the coach and logfile analyzer:
+
+Typing "./readLog" in the orca/coach directory will print a help text for using the
+logfile analyzer tool.
+To use the online coach, cd to orca/coach/online :
+./onlinecoach -t TEAMNAME -h HOSTNAME -p PORT [optional: -v for verbose]
+The online coach can only connect properly to the server if at least one of its players
+are already connected to the server.
+
+
+
+Mysterious files:
+
+form_view.r is a REBOL-script used to visualize the formation.conf
+
+
+
+
+More information:
+
+If you can't find what you are looking for in the documentation docu.ps.gz, feel free
+to send your questions or comments to robocup@cl-ki.uni-osnabrueck.de or visit us at
+http://www.cl-ki.uni-osnabrueck.de/~orca
+
+
+
+Osnabrück, 20th Nov 2001
+The ORCA project team
+
+
+

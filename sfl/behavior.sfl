@@ -1,0 +1,415 @@
+# Note:
+# Refer to behaviorPureSFL.sfl for comments in ENGLISH :)
+#########################################################
+#
+#
+# Defense:
+# Wenn der dichteste Spieler zum Ball den Ball abfangen kann, soll er dies tun.
+<5>
+(advice 
+  (6000 
+    (and 
+      (not 
+        (bowner our {0})
+      ) 
+      (ballInterceptable 
+        our { (closestPlayerToBall our) }
+      )
+    )
+    (do
+      our { (closestPlayerToBall our) }
+      (interceptball 100)
+    )
+  )
+)
+# Wenn der Ball in der Homerange eines Spielers ist, und nah am Ball nur 2 Mates sind, geht der dichteste zum Ball. do our{0} statt Closest, weil homepos eh nur
+# lokal aus Spielersicht ausgewertet wird.
+<4>
+(advice 
+  (6000 
+    (and 
+      (not 
+        (bowner our {0})
+      ) 
+      (bpos 
+        (arc (homepos) 0 15  0 360)
+      )
+      (ppos
+        our {0} 0 2 
+        (arc (pt ball) 0 5 0 360)
+      )
+    )
+    (do
+      our {0}
+      (pos (pt ball) 100)
+    )
+  )
+)
+# Wenn der beste Deckpartner im hinteren Viertel ist, deckt ihn der dichteste Spieler zum Tor hin ab.
+<3>
+(advice 
+  (6000 
+    (and 
+      (not 
+        (bowner our {0})
+      )
+      (ppos
+        opp {0} 1 11 
+        (arc (homepos) 0 18 0 360)
+      )
+      (ppos opp {(bestDeckPartner our {X})} 1 1 
+        (quad (pt -52.5 -34) (pt -52.5 34) (pt -35 -34) (pt -35 34))
+      )
+    )
+    (do
+      our { (closestPlayerToPlayer our opp {(bestDeckPartner our {X})}) }
+      (markl (pt -52.5 0) {(bestDeckPartner our {X})})
+    )
+  )
+)
+# Wenn der beste Deckpartner weiter vorn ist, stellt sich der dichteste zwischen Ball und den Gegner.
+<2>
+(advice
+  (6000
+    (and 
+      (not 
+        (bowner our {0})
+      )
+      (ppos
+        opp {0} 1 11
+        (arc (homepos) 15 30 0 360)
+      )
+      (not 
+        (ppos
+          opp { (bestDeckPartner our {X}) } 1 1 
+          (quad (pt -52.5 -34) (pt -52.5 34) (pt -35 -34) (pt -35 34))
+        )
+      )
+    )
+    (do
+      our 
+      {
+        (closestPlayerToPlayer
+          our
+          opp {(bestDeckPartner our {X})}
+        )
+      }
+      (markl 
+        (pt
+          opp {(bestDeckPartner our {X})}
+        )
+      )
+    )
+  )
+)
+#
+#
+# Offense:
+# wenn du beim Tor stehst, mach das Ding rein
+<5>
+(advice 
+  (6000 
+    (and 
+      (bowner our {0}) 
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "their_goal_zone"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)} 
+      (bto "their_goal" {s})
+    )
+  )
+)
+# wenn zuviele Gegner in deiner Naehe sind, pass den Ball...
+<4>
+(advice 
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        opp {0} 2 11 
+        (arc 
+          (pt our {(closestPlayerToBall our)}) 0 15 0 360
+        )
+      )
+    )
+    (do our
+      {(closestPlayerToBall our)}
+      (bto
+        { (bestPassPartner our {(closestPlayerToBall our)}) }
+      )
+    )
+  )
+)
+# wenn du den Ball hast, bewege Dich abhaengig von Deiner Position und der Anzahl der Gegner mit dem Ball in eine andere Region
+<3>
+(advice
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "back_top"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "middle_top_back" {pd})
+    )
+  )
+)
+<3>
+(advice
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "back_middle_bottom"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto (reg "middle_top_back" "back_top") {pd})
+    )
+  )
+)
+<3>
+(advice
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1 
+        "back_middle_top"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)} 
+      (bto (reg "back_bottom" "middle_bottom_back") {pd}
+      )
+    )
+  )
+)
+
+<3>
+(advice 
+  (6000 
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "back_bottom"
+      )
+    ) 
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "middle_bottom_back" {pd})
+    )
+  )
+)
+<3>
+(advice 
+  (6000 
+    (and 
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1 
+        "middle_top_back"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)} 
+      (bto "middle_top_front" {pd})
+    )
+  )
+)
+<3>
+(advice
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "middle_bottom_back"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "middle_bottom_front" {pd})
+    )
+  )
+)
+<3>
+(advice 
+  (6000 
+    (and 
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "middle_middle_back"
+      )
+    ) 
+    (do
+      our {(closestPlayerToBall our)}
+      (bto (reg "middle_middle_front" "middle_top_front") {pd})
+    )
+  )
+)
+<3>
+(advice
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "middle_middle_front"
+      )
+    )
+    (do our
+      {(closestPlayerToBall our)}
+      (bto "front_top" {pd})
+    )
+  )
+)
+<3>
+(advice
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "middle_bottom_front"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "front_bottom" {pd})
+    )
+  )
+)
+<3>
+(advice
+  (6000
+    (and
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "front_top"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "their_goal_zone" {pd})
+    )
+  )
+)
+<3>
+(advice 
+  (6000 
+    (and 
+      (bowner our {0})
+      (ppos
+        our {(closestPlayerToBall our)} 1 1
+        "front_bottom"
+      )
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "their_goal_zone" {pd})
+    )
+  )
+)
+#
+#
+# Defaultregel (niedrigste Fitness f. Offensive)
+<2>
+(advice 
+  (6000
+    (bowner our {0})
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "their_goal" {spdc})
+    )
+  )
+)
+#
+#
+# Misc:
+####6: (advice (6000 (bowner our {0}) (do our {(fastestPlayerToBall our)} (bto (pt 52.0 2) {ds}))))
+<2>
+(advice
+  (6000
+    (true)
+    (do
+      our {(closestPlayerToBall our)}
+      (pos (pt ball) 70)
+    )
+  )
+)
+<1>
+(advice 
+  (6000 
+    (true) 
+    (do
+      our {0}
+      (pos (homepos) 70)
+    )
+  )
+)
+# Fuer Anstoesse, Freistoesse, etc.:
+<6>
+(advice
+  (6000
+    (or
+      (playm ko_our)
+      (playm ki_our)
+      (playm fk_our)
+      (playm ck_our)
+    )
+    (do
+      our {(closestPlayerToBall our)}
+      (bto "their_goal" {pd})
+    )
+  )
+)
+# Sicherstellen, dass Before-Kickoff alle Positionen gesetzt werden
+<10>
+(advice
+  (6000
+    (playm bko)
+    (do our {0} (pos (homepos) 70))
+  )
+)
+#
+#
+# defines:
+# 1: (define (definer "their_goal_zone" (quad (pt 52.5 25) (pt 42 25) (pt 42 -25) (pt 52.5 -25))))
+<1> (define (definer "their_goal_zone" (arc (pt 52.5 0) 0 18 0 360)))
+<1> (define (definer "their_goal" (quad (pt 52.5 15) (pt 52 15) (pt 52 -15) (pt 52.5 -15))))
+<1> (define (definer "corner_their_bottom" (quad (pt 52.5 -34) (pt 42 -34) (pt 42 -25) (pt 52.5 -25))))
+<1> (define (definer "corner_their_top" (quad (pt 52.5 34) (pt 42 34) (pt 42 25) (pt 52.5 25))))
+#
+# 1: (define (definer "our_goal_zone" (quad (pt -52.5 25) (pt -42 25) (pt -42 -25) (pt -52.5 -25))))
+<1> (define (definer "our_goal_zone" (arc (pt -52.5 0) 0 18 0 360)))
+<1> (define (definer "our_goal" (quad (pt -52.5 15) (pt -52 15) (pt -52 -15) (pt -52.5 -15))))
+<1> (define (definer "corner_our_bottom" (quad (pt -52.5 -34) (pt -42 -34) (pt -42 -25) (pt -52.5 -25))))
+<1> (define (definer "corner_our_top" (quad (pt -52.5 34) (pt -42 34) (pt -42 25) (pt -52.5 25))))
+#
+<1> (define (definer "back_top" (quad (pt -52 34) (pt -14 34) (pt -14 12) (pt -52 12))))
+<1> (define (definer "back_middle_top" (quad (pt -52 20) (pt -14 20) (pt -14 0) (pt -52 0))))
+<1> (define (definer "back_middle_bottom" (quad (pt -52 0) (pt -14 0) (pt -14 -20) (pt -52 -20))))
+<1> (define (definer "back_bottom" (quad (pt -52 -34) (pt -14 -34) (pt -14 -12) (pt -52 -12))))
+#
+<1> (define (definer "middle_top_back" (quad (pt -14 34) (pt 0 34) (pt 0 12) (pt -14 12))))
+<1> (define (definer "middle_top_front" (quad (pt 0 34) (pt 14 34) (pt 14 12) (pt 0 12))))
+<1> (define (definer "middle_middle_back" (quad (pt -14 12) (pt 0 12) (pt 0 -12) (pt -14 -12))))
+<1> (define (definer "middle_middle_front" (quad (pt 0 12) (pt 14 12) (pt 14 -12) (pt 0 -12))))
+<1> (define (definer "middle_bottom_back" (quad (pt -14 -34) (pt 0 -34) (pt 0 -12) (pt -14 -12))))
+<1> (define (definer "middle_bottom_front" (quad (pt 0 -34) (pt 14 -34) (pt 14 -12) (pt 0 -12))))
+#
+<1> (define (definer "front_top" (quad (pt 14 34) (pt 52 34) (pt 52 12) (pt 14 12))))
+<1> (define (definer "front_middle" (quad (pt 14 12) (pt 42 12) (pt 42 -12) (pt 14 -12))))
+<1> (define (definer "front_bottom" (quad (pt 14 -34) (pt 52 -34) (pt 52 -12) (pt 14 -12))))

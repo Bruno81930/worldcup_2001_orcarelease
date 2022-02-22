@@ -1,0 +1,50 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my ($host, $teamname) = @ARGV;
+my @pids;
+my %pids;
+if ($pids[0] = fork()) {
+  $pids{$pids[0]} = 0;
+  sleep 1;
+}
+elsif (defined $pids[0]) {
+  my $ec = system("./orcaclient -goalie -file client.conf -file orca.conf -file server.conf -host $host " . 
+		  "-team_name $teamname");
+  $ec /= 256;
+  if ($ec == 139) {
+    print STDERR "the goalie ($pids[0]) had a segfault!\n";
+  }
+  exit($ec);
+}
+else {
+  die "weird forking error: $!\n";
+}
+
+for my $i (1..10) {
+  if ($pids[$i] = fork()) {
+    $pids{$pids[$i]} = $i;
+    sleep 1;
+  }
+  elsif (defined $pids[$i]) {
+    my @time =`time ./orcaclient -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname`;
+    my $ec = $?;
+    $ec /= 256;
+    if ($ec == 139) {
+      print STDERR "player $i ($pids[$i]) had a segfault at " . time() . "\n";
+    }
+    print STDERR $teamname . " timing: ", $_, "\n" foreach @time;
+    exit($ec);
+  }
+  else {
+    die "weird forking errror: $!\n";
+  }
+}
+
+my $pid;
+while (($pid = wait()) != -1) {
+  print STDERR (defined $pids{$pid} ? "player " . $pids{$pid} : "PID " . $pid) . 
+      " disconnected at " . time() . "\n";
+}
+

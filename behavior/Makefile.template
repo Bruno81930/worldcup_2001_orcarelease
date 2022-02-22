@@ -1,0 +1,32 @@
+SUBDIRS= play 
+
+OFILES = orcabehavior.o 
+
+# BUILTPATH is an environment variable
+CXX             = g++
+CCLIBS_Linux    = -lm -lbsd
+CXXLIBS         = $(CCLIBS_Linux)
+OSFLAGS_Linux   = -DLinux
+CXXFLAGS        =  -g $(OSFLAGS_Linux)
+CXXINCLUDE      = -I. -I..
+OPTMAKEFLAGS 	= 
+SRCS            = $(OFILES:%.o=%.C)
+
+NEWOFILES = $(OFILES:%.o=$(BUILDPATH)/%.o)
+
+export BUILDPATH
+
+$(BUILDPATH)/%.o : %.C %.h
+	$(CXX) -c $(CXXFLAGS) $(CXXINCLUDE) -o $@ $<
+
+all:
+	@if ! [ -d $(BUILDPATH) ]; then \
+	mkdir $(BUILDPATH);\
+	fi;
+	$(MAKE) $(NEWOFILES)
+	echo $(NEWOFILES);
+	@if ! [ $(SUBDIRS) == . ]; then\
+		for X in $(SUBDIRS) ; do \
+		cd $$X; $(MAKE) $(OPTMAKEFLAGS); cd .. ; done \
+	fi
+

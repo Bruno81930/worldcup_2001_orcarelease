@@ -1,0 +1,5 @@
+# KDE Config File
+[General]
+WorkingDirectory=
+FileVersion=1
+ProgramArgs=-file client.conf -file orca.conf -file server.conf -host localhost -team_name DirtySFLS -sfls

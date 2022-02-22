@@ -1,0 +1,150 @@
+// SFL grammar, based on the standard coach language (Clang)
+// Differences to Clang are explained by comments.
+
+
+<MESSAGE> -> <INFO_MESS> 
+           | <ADVICE_MESS> 
+           | <META_MESS> 
+           | <DEFINE_MESS> 
+           | <FREEFORM_MESS>
+
+#Advice and Info messages
+<INFO_MESS> -> (info <TOKEN_LIST>)
+<ADVICE_MESS> -> (advice <TOKEN_LIST>)
+<TOKEN_LIST> -> <TOKEN_LIST> <TOKEN> | <TOKEN>
+<TOKEN> -> (<TIME> <CONDITION> <DIRECTIVE_LIST>) 
+             | (clear)
+<CONDITION> -> (true) 
+             | (false) 
+             | (ppos NUM NUM TEAM UNUM_SET REGION)
+             | (bpos <REGION>) 
+             | (bowner <TEAM> <UNUM_SET>) 
+             | (playm <PLAY_MODE>) |
+             | (and <CONDITION_LIST>) |
+             | (or <CONDITION_LIST>) |
+             | (not <CONDITION>) 
+             | (action TEAM UNUM_SET ACTION)# Some player in UNUM_SET executes ACTION
+                                            # not implemented in SFLS
+             | (time VALUE)                 # Servertime is VALUE (so may be a variable)
+             | (goal_diff VALUE)            # Goal difference is VALUE
+             | (stamina TEAM UNUM_SET LEVEL)# Someone in UNUM_SET has the specified 
+                                            # stamina level
+             | (eq VALUE VALUE)             # Used to compare variables and/or constants
+             | (equnum UNUM UNUM)           # Used to compare uniform number variables
+             | (lt VALUE VALUE)             # less than
+             | (gt VALUE VALUE)             # greater than
+             | (state "STRING" "STRING")    # value of the state is the second STRING
+                                            # used to maintain states
+                                            # e.g. (state "ballStopped" "true")
+                                            # 2do maybe second STRING should be replaced by VALUE?
+             | (ballvelocity VARIABLE)      # ball has the specified velocity
+             | (ballinterceptable TEAM UNUM_SET) # Some player in UNUM_SET can intercept the ball
+             | (ballcatchable TEAM UNUM)         # intended for goalie, not implemented in SFLS
+             | "STRING"                     
+<CONDITION_LIST> -> <CONDITION_LIST> <CONDITION>
+<DIRECTIVE_LIST> -> <DIRECTIVE_LIST> <DIRECTIVE> | <DIRECTIVE>
+<DIRECTIVE> -> (do <TEAM> <UNUM_SET> <ACTION>) |
+             | (dont <TEAM> <UNUM_SET> <ACTION>) 
+             | (force <TEAM> <UNUM_SET> <ACTION>) # execute this rules as soon as encountered,
+                                                  # ignore all other active rules
+             | "STRING"             	   
+
+<ACTION> -> (pos <REGION> [real]) |               # Dash_power
+          | (pos <REGION>) |
+          | (home <REGION>)  | 
+          | (bto <REGION> <BMOVE_SET>) |
+          | (bto <UNUM_SET> PASS_MODE_LIST ) |    # PASS_MODE
+          | (mark <UNUM>) |
+          | (markl <UNUM>) |
+          | (markl <REGION>) |
+          | (markl <REGION> <UNUM>) | 		  # position agent between opponent UNUM and REGION
+          | (oline <REGION>) |
+          | (htype <HET_TYPE>) 
+          | (state "STRING" "STRING")         # saves states
+                                              # e.g. (state "ballStopped" "true")
+          | (interceptball [real])	# intercept ball with speed [real].
+          | (catchball)                 # intended for goalie, not implemented in SFLS
+          | "STRING"
+
+
+<VALUE>		-> integer | real | 'A'-'Z'
+<LEVEL>	 	-> low | mid | high 	        # Levels for Stamina and such
+
+<PASS_MODE_LIST> -> <PASS_MODE_LIST> <PASS_MODE> | <PASS_MODE>
+<PASS_MODE> -> safe  | risc | short | long      # similar to BMOVE_TOKEN. 
+
+<PLAY_MODE> -> bko | time_over | play_on 
+             | ko_our | ko_opp | ki_out | ki_opp | fk_our | fk_opp
+             | ck_our | ck_opp | gk_our | gk_opp | gc_our | gc_opp
+             | ag_our | ag_opp
+<TIME> -> [int]
+<HET_TYPE> -> [int]     
+<TEAM> -> our | opp
+          | both        # not implemented in SFLS
+	  | teamOfFastestPlayerToBall 	# situation-specific symbol
+	  | teamOfClosestPlayerToBall   #situation-specific symbol
+	  | (teamOfFastestPlayerToPlayer TEAM UNUM) #situation-specific symbol
+	  | (teamOfClosestPlayerToPlayer TEAM UNUM) #situation-specific symbol
+<UNUM> -> [int(0-11)]
+          | 'A'-'Z'		# UNUMVARIABLE
+          | (FastestPlayerToBall TEAM) 	#situation-specific symbol
+          | (ClosestPlayerToBall TEAM)	#situation-specific symbol
+          | (FastestPlayerToPlayer TEAM TEAM UNUM) #situation-specific symbol, 
+                        #first TEAM denotes the team of the resulting player,
+                        # second TEAM and UNUM describe target-player
+          | (ClosestPlayerToPlayer TEAM TEAM UNUM) #situation-specific symbol
+          | (BestPassPartner TEAM UNUM)	           #situation-specific symbol
+                                    # best passpartner of UNUM in TEAM
+                                    # TEAM and UNUM are ignored in SFLS
+	  | (BestDeckPartner TEAM UNUM)	   #situation-specific symbol
+                                    # TEAM and UNUM are ignored in SFLS
+		  
+		  
+<UNUM_SET> -> { <UNUM_LIST> }
+<UNUM_LIST> -> <UNUM_LIST> <UNUM> | e 
+                                     
+<BMOVE_SET> -> { <BMOVE_LIST> }
+<BMOVE_LIST> -> <BMOVE_LIST> <BMOVE_TOKEN> | <BMOVE_TOKEN>
+<BMOVE_TOKEN> -> p | d | c | s 
+                               
+
+
+
+<REGION> -> <POINT> |
+          | (null)
+          | (homepos)         # homeposition of the evaluating(!) agent
+          | (quad <POINT> <POINT> <POINT> <POINT>) |
+          | (arc <POINT> [real] [real] [real] [real]) |
+          | (reg <REGION_LIST>)
+          | "STRING"
+<REGION_LIST> -> <REGION_LIST> <REGION> | <REGION>
+<POINT> -> (pt [real] [real])
+          | (pt [real] [real] <POINT>)
+          | (pt ball)				
+          | (pt <TEAM> <UNUM>)	
+          | (mult <POINT> <POINT>) # multiply coordinates
+          | (plus <POINT> <POINT>) # add coordinates, minor differences
+                                   # to  point-relative
+
+<META_MESS> -> (meta <META_TOKEN_LIST>)
+<META_TOKEN_LIST> -> <META_TOKEN_LIST> <META_TOKEN> | <META_TOKEN>
+<META_TOKEN> -> (ver [int])
+
+<DEFINE_MESS> -> (define <DEFINE_TOKEN_LIST>)
+<DEFINE_TOKEN_LIST> -> <DEFINE_TOKEN_LIST> <DEFINE_TOKEN> 
+                     | <DEFINE_TOKEN>
+<DEFINE_TOKEN> -> <CONDITION_DEFINE> 
+                | <DIRECTIVE_DEFINE> 
+                | <REGION_DEFINE>
+                | <ACTION_DEFINE> 
+		| <PLAN_DEFINE>		# used to collect several rules into one
+                                        # named tactic. untested in SFLS
+<CONDITION_DEFINE> -> (definec "[string]" <CONDITION>)
+<DIRECTIVE_DEFINE> -> (defined "[string]" <DIRECTIVE>)
+<REGION_DEFINE> ->    (definer "[string]" <REGION>)
+<ACTION_DEFINE> ->    (definea "[string]" <ACTION>)
+<PLAN_DEFINE>   ->	  (defineplan "[string]" <TOKEN_LIST>)	# see above
+
+<FREEFORM_MESS> -> (freeform "[string]")
+
+

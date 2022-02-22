@@ -1,0 +1,47 @@
+#!/bin/bash
+#Execution File
+
+export host="localhost"
+export teamname="DirtyDozen"
+export programname="orcaclient"
+
+export facility=8
+export simulator_step=30
+
+echo "Running with the following parameters"
+echo "Hostname: " $host
+echo "Team1: " $teamname
+echo "Program: " $programname
+echo "Sim_step: " $simulator_step
+echo "Facility: " $facility
+
+
+./$programname -goalie -debug_fac $facility -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility  -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+./$programname -debug_fac $facility -file orca.conf -file client.conf -file server.conf -host $host -team_name $teamname &
+./quicksleep
+
+
+
+
+
+
+

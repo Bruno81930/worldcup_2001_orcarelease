@@ -1,0 +1,77 @@
+CXX		= g++
+CC              = gcc
+
+CCLIBS_default	= -lm
+CCLIBS_SunOS_4	= -lm
+CCLIBS_SunOS_5	= -lm -L/usr/ucblib -lucb -lsocket -lnsl
+CCLIBS_SunOS_5	= -lm -L/usr/ucblib -lsocket -lnsl
+CCLIBS_OSF1		= -lm
+CCLIBS_NEWS		= -lm
+CCLIBS_IRIX		= -lm
+CCLIBS_Linux	= -lm # -lpthread
+CXXLIBS			= $(CCLIBS_Linux)
+#CXXLIBS			= $(CCLIBS_SunOS_4)
+#CXXLIBS			= $(CCLIBS_SunOS_5)
+
+OSFLAGS_default	= 
+OSFLAGS_SunOS_4	= -DSunOS4
+OSFLAGS_SunOS_5	= -DSolaris -DMEMSET
+OSFLAGS_OSF1	= -DOSF1
+OSFLAGS_NEWS	= -DNewsOS
+OSFLAGS_IRIX	= -DIRIX -D_BSD_SIGNALS
+OSFLAGS_Linux	= -DLinux -D_REENTRANT
+CXXFLAGS	= -g $(OSFLAGS_Linux)
+#CXXFLAGS	= -Wall $(OSFLAGS_SunOS_4)
+#CXXFLAGS	= -Wall -pedantic -fomit-frame-pointer -O3 $(OSFLAGS_SunOS_5)
+
+CXXFLAGS += -Wall -g -DCOACH_LANG_TESTER
+
+#CXXLIBS += -ll
+
+BISONFLAGS = -dt 
+#BISONFLAGS += --no-lines
+LEXFLAGS = 
+
+OFILES = clangparser.o main.o
+OFILES += coach_lang.o region.o coach_lang_comp.o garbage.o
+SRCS = $(OFILES:%.o=%.C)
+
+GEN_OFILES+= coach_lang.tab.o lex.yy.o
+GEN_SRCS = $(GEN_OFILES:%.o=%.c) coach_lang.tab.h
+
+all: main
+
+$coach_lang.tab.h: coach_lang.y
+	bison $(BISONFLAGS) $^
+
+coach_lang.tab.c: coach_lang.y
+	bison $(BISONFLAGS) $^
+
+lex.yy.c: coach_lang.l coach_lang.h
+	flex $(LEXFLAGS) $<
+
+main: $(OFILES) $(GEN_OFILES)
+	$(CXX) -g $^ -o $@ $(CXXLIBS)
+
+%.o : %.C
+	$(CXX) -c $(CXXFLAGS) $(CXXINCLUDE) $<
+%.o : %.c
+	$(CXX) -c $(CXXFLAGS) $(CXXINCLUDE) $<
+
+clean:
+	echo cleaning up....
+	/bin/rm -f $(OFILES) $(GEN_OFILES)
+realclean: clean
+	echo cleaning up everything
+	/bin/rm -f $(GEN_SRCS)
+genfiles: $(GEN_SRCS)
+
+depend:
+	$(RM) $(DEPEND)
+	$(CXX) -M $(CXXFLAGS) $(SRCS) >> $(DEPEND)
+
+DEPEND = Makefile.depend
+ifeq ($(wildcard $(DEPEND)),$(DEPEND))
+include $(DEPEND)
+endif
+

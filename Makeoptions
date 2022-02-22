@@ -1,0 +1,21 @@
+# options for all Makefiles
+# is included by all other Makefiles
+
+VERBOSE		= true
+
+CXX		= g++
+
+OSFLAGS_Linux   = -DLinux 
+
+CCLIBS_Linux    = -lm -lbsd-compat
+CXXLIBS         = $(CCLIBS_Linux)
+
+# options not used
+CCLIBS_OPTIONAL = -lbsd -ln++
+
+CXXFLAGS        =   -ggdb -Wall $(OSFLAGS_Linux)
+CXXFLAGS	+= 
+CXXFLAGS        +=
+#CXXFLAGS        =  -Wall $(OSFLAGS_Linux)
+#CXXFLAGS	+= 
+#CXXFLAGS        += -DDEBUG 

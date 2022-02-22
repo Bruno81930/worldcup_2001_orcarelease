@@ -1,0 +1,1843 @@
+/* -*- Mode: C++ -*- */
+
+/* Memory.C
+ * CMUnited99 (soccer client for Robocup99)
+ * Peter Stone <pstone@cs.cmu.edu>
+ * Computer Science Department
+ * Carnegie Mellon University
+ * Copyright (C) 1999 Peter Stone
+ *
+ * CMUnited-99 was created by Peter Stone, Patrick Riley, and Manuela Veloso
+ *
+ * You may copy and distribute this program freely as long as you retain this notice.
+ * If you make any changes or have any comments we would appreciate a message.
+ * For more information, please see http://www.cs.cmu.edu/~robosoccer/
+ */
+ 
+ 
+// 2do: several SFL-features aren't implemented yet, e.g. evalStamina(), evalAction()
+// 2do: handleVariable is untested and might need to be expanded by a "positive" flag
+// 2do: basically no memory is ever freed. memory leaks en masse.
+// 2do: as of now FastestPlayerToPlayer is the same as ClosestPlayerToPlayer
+// 2do: BestDeckPartner will always result in  best cover partner of this client (TEAM and UNUMSET
+//	are ignored)
+// 2do: as soon as we use TEAM and UNUMSET in BestDeckPartner and BestPassPartner, we
+//	have to handle the domain of the nested Variables like in
+//	{(BestDeckPartner our {X})}. We also need to know, which deckpartner referred to
+//	which player, so we can remove the player from X, if the deckpartner doesn't
+//	satisfy the condition
+// 2do: BUG: variables are handled as if in AND-conditions when encountered in OR-conditions!
+
+ 
+#include "Memory.h"
+#include "types.h"
+// next two includes are for printing messages into a string:
+#include <iostream.h>
+// sstream is a publicly available tool:
+#include "coach/online/sstream"
+#include "behavior/play/defenseplaytree.h"
+#include "behavior/play/offenseplaytree.h"
+
+
+/* This method should some day be removed. Nasty way of finding the regiontype .*/
+bool classNameStartsWith(Region * region, char *description){
+	static Region * lastRegion = NULL;	// remember last checked Region
+	static string outstring = "";
+
+	ostringstream ost;
+	if(lastRegion!=region){
+		region->Print(ost);
+		lastRegion=region;
+		outstring=ost.str();
+		//cout << "Neu:" << outstring << "=?" << string(description);
+	}//else cout << "gleich...";
+
+	//cout << "bla: region=" << *region << " desc=" << string(description) << endl; 
+
+	int dlength = strlen(description);
+	//cout << "..." << dlength;
+	if(strncmp(outstring.c_str(),description,dlength)==0){
+		return true;
+	}else{
+		return false;
+	}
+}
+
+bool PrettyclassNameStartsWith(Region * point, char *description){
+	static Region * lastPoint = NULL;	// remember last checked Region
+	static string outstring = "";
+
+	ostringstream ost;
+	if(lastPoint!=point){
+		point->PrintPretty(ost,"");
+		lastPoint=point;
+		outstring=ost.str();
+	}
+	int dlength = strlen(description);
+	if(strncmp(outstring.c_str(),description,dlength)==0){
+		return true;
+	}else{
+		return false;
+	}
+}
+
+
+
+Memory::Memory(){
+///  printf("Memory.C: %p", *this);
+}
+
+
+
+
+void Memory::Initialize()
+{
+    PlayerInfo::Initialize();
+    PositionInfo::Initialize();
+    ActionInfo::Initialize();
+    FormationInfo::Initialize();
+
+    cerr << "PointSet-File: " << OP_pppoints_file_name << endl;
+
+
+    pppoints = new PointSet(OP_pppoints_file_name);
+
+    currentCoachMessage = 0;
+
+    if(Mem->OP_use_sfls)
+    {
+    	effector = new SFLSEffector();
+    	sfls = new SFLS_System("./sfl/behavior.sfl");
+    }
+    
+    CoachAdvice.clear();
+    CoachInfo.clear();
+
+}
+
+
+//__________________________________________________________________________________
+
+void Memory::parseSFLSRule(char message[]){
+
+    CM_Message* SFLS_Rule = parse_coach_message(message);
+    if(SFLS_Rule != NULL){
+
+	//SFLS_Rule->Print(cout);
+
+ 	vector<CM_Token*> tokens = ((CM_AdviceMessage*)SFLS_Rule)->getTokens();
+
+	MAKELOG((40, DBG_OTHER, "adding %d Tokens:" ,tokens.size()));
+
+	for(int tok=0; tok<(signed)tokens.size(); tok++){
+		RuleSet.push_back((CM_TokRule*)tokens[tok]);
+	}
+
+
+    }else{
+	cerr << "ERROR, could not parse SFLS-rule: "<< message << endl;
+    }
+
+}
+
+
+
+void Memory::setCurrentCoachMessage(char message[], int send_time)
+{
+	if(!OP_use_sfls) return;	// use coach only with sfls-team for now.
+	cout << "Adding coach message: " << string(message) << endl;
+	sfls->handle_message(message, 100);	// just add it to RuleBase with a high credit
+
+		
+/* obsolete
+    CM_Message* coachMessage = parse_coach_message(message);
+
+    MAKELOG((40, DBG_OTHER, "received coach message: "));
+
+    if(coachMessage != NULL)
+    {
+        currentCoachMessage = coachMessage;
+        currentCoachMessage->setTimeRecv(send_time);
+
+	setCoachTokens();		// save tokens into CoachAdvice&CoachInfo,
+					// maintain definitions
+	updateCoachVariables();		// if changed, set coachPullOffsidePosition etc.
+
+    }
+    else
+    {
+        MAKELOG((40, DBG_OTHER, "coach message parse error"));
+    }
+
+    MAKELOG((40, DBG_OTHER, "\n\n"));
+*/
+}
+
+
+
+void Memory::resetTokenVector(vector<CM_Token*> &vec){
+	for(int i=0; i<(signed)vec.size(); i++)
+		delete vec[i];
+	vec.clear();
+}
+
+
+
+#include "types.h"
+
+bool Memory::noMoveMode(){
+	return (PlayMode!=PM_Before_Kick_Off && PlayMode!=PM_My_Kick_Off && 
+	   PlayMode!=PM_Their_Kick_Off);
+}
+void Memory::setEffectorMoved(bool moved){
+	effector->movedalready=moved;
+}
+bool Memory::getEffectorMoved(){
+	return effector->movedalready;
+}
+
+
+
+// #############################################################
+// ################## SFLS: Selector################ ###########
+// #############################################################
+
+/** evaluates all points in a region and constructs a new one.
+  */
+Region * Memory::specifyRegion(Region * region, CM_Condition *condition, CM_Token *rule,
+				bool positive){
+				
+  	//cout << "bla: <specifying Region>:";
+	//region->Print(cout);
+	//cout << endl;
+
+    Region * newregion=NULL;
+    if(classNameStartsWith(region, "(home")){
+    	newregion=new SFLS_RegHome();
+    }else
+    if(classNameStartsWith(region,"(arc")){	// arc
+	newregion=new RegArc(
+		evaluatePoint(((RegArc *)region)->getCenter(),condition,rule,positive),
+		((RegArc *)region)->getStartRad(),
+		((RegArc *)region)->getEndRad(),
+		((RegArc *)region)->getStartAng(),
+		((RegArc *)region)->getSpanAng()
+		 );
+    }else
+    if(classNameStartsWith(region,"(reg")){	// union
+    	// create a new RegUnion and add specified regions to it
+    	newregion = new RegUnion();
+   	for(int i=0; i<((RegUnion*)region)->getNumRegions(); i++){
+		((RegUnion*)newregion)->addRegion(specifyRegion(
+			((RegUnion*)region)->getRegion(i), condition,rule,positive));
+	}
+    }else
+    if(classNameStartsWith(region,"\"")){		// named region
+   	char *regName = ((RegNamed*)region)->getName();
+	// find name:
+	int indexOfDefinition=-1;
+	for(int i=0; i<(signed)RegionNames.size(); i++){
+		if(strcmp(RegionNames[i],regName)==0)
+			indexOfDefinition=i;
+	}
+	if(indexOfDefinition==-1){
+		MAKELOG((15,DBG_OTHER,"Warning, using undefined region."));
+		return NULL;
+	}
+	newregion=specifyRegion(definedRegions[indexOfDefinition],condition,rule,positive);
+    }else
+    if(classNameStartsWith(region,"\'")){		// named point
+   	char *regName = ((SFLS_PointNamed*)region)->getName();
+	// find name:
+	int indexOfDefinition=-1;
+	for(int i=0; i<(signed)PointNames.size(); i++){
+		if(strcmp(PointNames[i],regName)==0)
+			indexOfDefinition=i;
+	}
+	if(indexOfDefinition==-1){
+		cerr << "Error, using undefined point" << endl;
+		return NULL;
+	}
+	newregion=specifyRegion(definedPoints[indexOfDefinition],condition,rule,positive);
+    }else    
+    if(classNameStartsWith(region,"(quad")){	// quad
+	newregion=new RegQuad(
+		evaluatePoint(((RegQuad *)region)->getPt(0),condition,rule,positive),	
+		evaluatePoint(((RegQuad *)region)->getPt(1),condition,rule,positive),	
+		evaluatePoint(((RegQuad *)region)->getPt(2),condition,rule,positive),	
+		evaluatePoint(((RegQuad *)region)->getPt(3),condition,rule,positive)
+	);
+
+    }else
+    if(PrettyclassNameStartsWith(region,"Point(")){
+    	// just copy it
+    	newregion = new  RegPointSimple(((RegPointSimple*)region)->getX(),
+				  ((RegPointSimple*)region)->getY());
+    }
+    if(PrettyclassNameStartsWith(region,"Point-Relative")){
+		// get point, evaluate it and add offsets.
+		RegPointSimple *fixpoint=evaluatePoint(((RegPointRelative*)region)->getPt(),
+		condition,rule,positive);
+		RegPointSimple *resultpoint=
+			new RegPointSimple(fixpoint->getX()+
+			          ((RegPointRelative*)region)->getRelX(),
+				  fixpoint->getY()+
+				  ((RegPointRelative*)region)->getRelY());
+		delete(fixpoint);	// it was from "new" in evaluatePoint()
+		return resultpoint;
+    }else
+    if(classNameStartsWith(region,"(pt ball")){
+        	newregion = evalRegPointBall();
+    }
+    if(PrettyclassNameStartsWith(region,"Point-Player")){
+        	newregion = evalRegPointPlayer(region,condition,rule,positive);
+    }
+    if(classNameStartsWith(region,"(plus")){
+    		/*
+        	newregion = evalPlusRegPoint(
+			evaluatePoint(((SFLS_PlusPoint *)region)->getA(),condition,rule,positive),
+			evaluatePoint(((SFLS_PlusPoint *)region)->getB(),condition,rule,positive)
+		);
+		*/
+		newregion=evaluatePoint((SFLS_PlusPoint *)region,condition,rule,positive);
+		
+    }
+    if(classNameStartsWith(region,"(mult")){
+    		/*
+        	newregion = evalMultRegPoint(
+			evaluatePoint(((SFLS_MultPoint *)region)->getA(),condition,rule,positive),
+			evaluatePoint(((SFLS_MultPoint *)region)->getB(),condition,rule,positive)
+		);
+		*/
+		newregion=evaluatePoint((SFLS_MultPoint *)region,condition,rule,positive);
+    }
+
+    // The other regiontypes should remain unchanged.
+    // 2do they should be deep-copied, too, so we can use deconstructors of new action.
+      	//cout << "bla: </specified Region>:";
+	//newregion->Print(cout);
+	//cout << endl;
+
+    
+    return newregion;
+}
+
+
+/** evaluates a SFLS_UnumSet and its functions and creates a new UnumSet.
+  * eventuell UnumSets auch kopieren, um besser loeschen zu koennen
+  * it returns a SFLS_UnumSet* , although it is actually only UnumSet *
+  */
+SFLS_UnumSet * Memory::specifySFLSUnumSet(SFLS_UnumSet * unumset, CM_Condition *condition,
+				CM_Token * rule, bool positive){
+	SFLS_UnumSet * newunumset= new SFLS_UnumSet();
+	newunumset->entries=unumset->entries;	// copy constant unums
+	vector<SFLS_Function *> * functions=unumset->getSFLS_Functions();
+	UnumSet * emptySet=new UnumSet();	// always empty
+	
+	if(unumset->getLastTimeEvaluated()==CurrentTime.t) newunumset->entries=unumset->entries;
+	
+	for(int func=0; func<(signed)functions->size(); func++){
+		if((*functions)[func]->getType()==Variable){
+			int another=0;
+			while((another=unumset->getOneByOneOfVariables(another,rule))!=-1)
+				newunumset->addNum(another);
+		}else{
+			if(unumset->getLastTimeEvaluated() != CurrentTime.t){
+				newunumset->addNum(evalFunction((*functions)[func], condition,rule,
+					emptySet, positive));
+			}
+		}
+	}
+	//cout << "bla: specified UnumSet "; newunumset->Print(cout);
+	delete(emptySet);
+	return newunumset;
+}
+
+
+
+/** constructs a new action in which almost everything is constant/evaluated,
+  * e.g. relative positions, team-functions and unumsets
+  * 2do Dekonstruktoren für Aktionen
+  */
+CM_Action * Memory::specifyAction(CM_Action * action, CM_Condition* condition,
+			CM_Token *rule, bool positive){
+	//cout << "bla: <specifying action>: ";
+	//action->Print(cout);
+	//cout << endl;
+	CM_Action * newaction=NULL;
+	SFLS_UnumSet *specifiedUnumSet=NULL;
+	
+	switch(action->getType()){
+		case CMA_Position		:
+			newaction = new CM_ActPosition(
+				specifyRegion(((CM_ActPosition*)action)->getRegion(),
+						condition,rule,positive)
+			);
+			break;
+		case CMA_Home			:
+			newaction = new CM_ActHome(
+				specifyRegion(((CM_ActHome*)action)->getRegion(),
+						condition,rule,positive)			
+			);
+			break;
+		case CMA_BallToRegion		:
+			newaction = new CM_ActBallToRegion(
+				specifyRegion(((CM_ActBallToRegion*)action)->getRegion(),
+						condition,rule,positive),
+				const_cast<BallMoveTokenSet&>(((CM_ActBallToRegion*)action)->getBMTSet())
+			);
+			break;
+		case CMA_BallToPlayer		:
+			newaction = new CM_ActBallToPlayer(
+				const_cast<UnumSet&>(((CM_ActBallToPlayer*)action)->getPlayers())
+			);
+			break;		
+		case CMA_Mark			:	
+			newaction = new CM_ActMark(
+				const_cast<UnumSet&>(((CM_ActMark*)action)->getPlayers())
+			);
+			break;		
+		case CMA_MarkLinePlayer		:
+			newaction = new CM_ActBallToPlayer(
+				const_cast<UnumSet&>(((CM_ActMarkLinePlayer*)action)->getPlayers())
+			);
+			break;		
+		case CMA_MarkLineRegion		:
+			newaction = new CM_ActMarkLineRegion(
+				specifyRegion(((CM_ActMarkLineRegion*)action)->getRegion(),
+						condition,rule,positive)	
+			);
+			break;
+		case CMA_OffsidesLine		:
+			newaction = new CM_ActOffsidesLine(
+				specifyRegion(((CM_ActOffsidesLine*)action)->getRegion(),
+						condition,rule,positive)	
+			);
+			break;
+		case CMA_HetType		:
+			newaction = new CM_ActHetType(
+				((CM_ActHetType*)action)->getPlayerType()
+			);
+			break;
+		case CMA_Named			:
+			MAKELOG((40,DBG_OTHER,"Warning, not sure what to do here."));
+			break;
+		case SFLSA_Position		:
+			newaction = new SFLS_ActPosition(
+				specifyRegion(((SFLS_ActPosition*)action)->getRegion(),
+						condition,rule,positive),
+				((SFLS_ActPosition*)action)->getDashPower()
+			);
+			break;
+		case SFLSA_MarkLineRegionPlayer	:
+		        newaction = new SFLS_ActMarkRegionPlayer(
+                		specifySFLSUnumSet(((SFLS_ActMarkRegionPlayer *)action)->getPlayers(),
+                        	condition,rule,positive),
+                		specifyRegion(((SFLS_ActMarkRegionPlayer*)action)->getRegion(),
+                        	condition,rule,positive)
+            		);
+			break;
+		case SFLSA_State		:
+			newaction = new SFLS_ActState(
+				((SFLS_ActState*)action)->getName(),
+				((SFLS_ActState*)action)->getValue()				
+			);
+			break;
+		case SFLSA_InterceptBall	:
+			newaction = new SFLS_ActInterceptBall(
+				((SFLS_ActInterceptBall*)action)->getPower()
+			);
+			break;
+		case SFLSA_ActMarkLinePlayer	:
+			newaction = new SFLS_ActMarkLinePlayer(
+				specifySFLSUnumSet(((SFLS_ActMarkLinePlayer *)action)->getPlayers(),
+						condition,rule,positive)
+			);
+			break;
+		case SFLSA_Mark			:
+			newaction = new SFLS_ActMark(
+				specifySFLSUnumSet(((SFLS_ActMark *)action)->getPlayers(),
+						condition,rule,positive)
+			);
+			break;
+		case SFLSA_BallToPlayer		:
+			specifiedUnumSet = 
+				specifySFLSUnumSet(((SFLS_ActBallToPlayer *)action)->getPlayers(),
+						condition,rule,positive);
+			//cout << "bla: outside, specified unumset: "; specifiedUnumSet->Print(cout);
+			//cout << endl;
+			newaction = new SFLS_ActBallToPlayer(specifiedUnumSet);
+			//cout << "bla: created newaction: "; newaction->Print(cout); cout << endl;
+			break;
+		case SFLSA_CatchBall		:
+			newaction = new SFLS_ActCatchBall();
+			break;
+		default:
+			MAKELOG((30,DBG_OTHER,"Warning, some action type has not been copied."));
+			return newaction;
+	}
+	
+	/*
+		delete(newaction);	// dies sollte dann auch kopierte Regionen und
+					// UnumSets loeschen. Einige Regionen werden aber
+					// noch nicht kopiert, genauso BMTSet in BallToReg
+					// Was ist mit CM_Actions, die keine SFLSUnums
+					// haben?
+	*/
+	return newaction;
+}
+
+
+// #############################################################
+// ################## SFLS: evaluation of conditions ###########
+// #############################################################
+
+bool Memory::doesDirectiveReferToMe(CM_Directive * directive, CM_TokRule * rule){	    
+    if(directive->getType()==CMD_Named){
+	// getName, find index in namevector and get index in
+	char * dirName = ((CM_DirNamed*)directive)->getName();
+	int dirIndex=-1;
+	for(int i=0; i<(signed)DirectiveNames.size(); i++){
+		if(strcmp(DirectiveNames[i], dirName)==0){
+			dirIndex=i;
+		}
+	}
+	if(dirIndex==-1){
+		MAKELOG((20,DBG_OTHER,"Warning, using undefined directive."));
+		return false;
+	}
+	directive=definedDirectives[dirIndex];
+	// now let the rest of the function handle it.
+    }
+    if(directive->getType()==CMD_Command){
+	UnumSet playerSet;
+	playerSet=((CM_DirCommand*)directive)->getPlayerSet();
+	if(playerSet.isNumMember(MyNumber) &&
+	    ((CM_DirCommand*)directive)->isOurSide()){
+		return true;
+	    }
+    }else{
+	SFLS_UnumSet *playerSet;
+	playerSet=((SFLS_DirCommand*)directive)->getPlayerSet();
+	if(playerSet->isNumMember(MyNumber, rule,
+		rule->getCondition(), true,true) &&
+		evalTeam(((SFLS_DirCommand*)directive)->getTeam(),rule)==SFLS_OUR ){
+		return true;
+	    }
+    }
+    return false;
+}
+
+
+
+/** removes all rules from the vector whose directives do not refer to this player
+  */
+void Memory::removeIrrelevantRulesFromVector(vector<CM_Token *> *rulevector){
+    vector<CM_Directive*> directives;
+    vector<CM_Token *>::iterator tok_iter;
+    vector<CM_Token *>::iterator endtok_iter=(*rulevector).end();
+    tok_iter=(*rulevector).begin();
+    while(tok_iter!=endtok_iter){
+		if(tok_iter>=endtok_iter) break;	// this sucks
+
+        directives.clear();
+        bool relevant=false;
+
+
+        directives=((CM_TokRule*)(*tok_iter))->getDirectives();
+
+
+        for(int dir=0; dir<(signed)directives.size(); dir++){
+		    relevant=doesDirectiveReferToMe(directives[dir],(CM_TokRule*) (*tok_iter));
+		    if(relevant) break;
+        }
+        if(!relevant){          // remove rules that don't refer to me
+            (*rulevector).erase(tok_iter);
+            tok_iter=(*rulevector).begin();
+        }else{
+			tok_iter++;
+		}
+		endtok_iter=(*rulevector).end();
+    }
+}
+
+
+
+
+// Note: We do not use the eval()-Methods in coach_lang_comp.C to avoid
+// complicated includes and recursive compilation.
+bool Memory::eval(CM_Condition * token, CM_Token * rule){
+	return eval(token, rule, true);
+}
+/** evaluates the condition that uses the variableSet of rule. If the condition is
+  * negated positive is false (only used for removing Unums from possible variable values)
+  */
+bool Memory::eval(CM_Condition * token, CM_Token * rule, bool positive){
+	if(!token) return false;
+	switch(token->getType()){
+  		case CMC_True			: return true;
+		case CMC_False			: return false;
+		case CMC_PlayerPosition 	: return evalPlayerPosition(token,rule,false,positive);
+		case CMC_BallPosition		: return evalBallPosition(token,rule,positive);
+		case CMC_BallOwner		: return evalBallOwner(token, rule, false,positive);
+		case CMC_PlayMode		: return evalPlayMode(token);
+		case CMC_And			: return evalAnd(token, rule,positive);
+		case CMC_Or			: return evalOr(token, rule,positive);
+		case CMC_Not			: return evalNot(token, rule,positive);
+		case CMC_Named			: return evalNamed(token, rule,positive);
+		case SFLSC_Action 		: return evalAction(token, rule,positive);
+		case SFLSC_BallVelocity		: return evalBallVelocity(token, rule);
+		case SFLSC_GoalDiff		: return evalGoalDiff(token, rule);
+		case SFLSC_Time			: return evalTime(token, rule);
+		case SFLSC_State		: return evalState(token);
+		case SFLSC_Stamina		: return evalStamina(token, rule,positive);
+		case SFLSC_BallInterceptable	: return evalBallInterceptable(token, rule,positive);
+		case SFLSC_Equal		: return evalEqual(token,positive);
+		case SFLSC_Less			: return evalLess(token,positive);
+		case SFLSC_Greater		: return evalGreater(token,positive);
+		case SFLSC_BallOwner		: return evalBallOwner(token, rule, true,positive);
+		case SFLSC_PlayerPosition	: return evalPlayerPosition(token,rule,true,positive);
+		case SFLSC_BallCatchable	: return evalBallCatchable(token, rule,positive);
+		case SFLSC_EqualUnum    	: return evalEqualUnum(token, rule,positive);
+		default:
+			MAKELOG((20,DBG_OTHER, "Error: unidentified condition type"));
+			return false;
+	}
+}
+bool Memory::evalNot(CM_Condition * token, CM_Token * rule, bool positive){
+	return !eval(((CM_CondNot*)token)->getCondition(), rule,!positive);
+}
+bool Memory::evalAnd(CM_Condition * token, CM_Token * rule, bool positive){
+	vector<CM_Condition*> conditions=((CM_CondAnd*)token)->getConditions();
+	for(int i=0; i<(signed)conditions.size(); i++){
+		if(!eval(conditions[i], rule, positive)){
+			return false;
+		}
+	}
+	return true;
+}
+bool Memory::evalOr(CM_Condition * token, CM_Token * rule, bool positive){
+	vector<CM_Condition*> conditions=((CM_CondOr*)token)->getConditions();
+	for(int i=0; i<(signed)conditions.size(); i++){
+		if(eval(conditions[i], rule,positive)){
+			return true;
+		}
+	}
+	return false;
+}
+bool Memory::evalPlayerPosition(CM_Condition * token, CM_Token * rule, bool SFLS, bool positive){
+	int min=((CM_CondPlayerPosition*)token)->getMinMatch();
+	int max=((CM_CondPlayerPosition*)token)->getMaxMatch();
+	int numberOfUnumsMatched=0;	// how many of the unums in UnumSet satisfy this?
+	Region* region=((CM_CondPlayerPosition *)token)->getRegion();
+	SFLS_UnumSet *SFLSplayerSet=NULL;
+	UnumSet CMplayerSet;
+	if(SFLS)
+		SFLSplayerSet=((SFLS_CondPlayerPosition*)token)->getPlayerSet();
+	else
+		CMplayerSet=((CM_CondPlayerPosition*)token)->getPlayerSet();
+	Vector pos;
+	// check pos
+	bool ourside;
+	if(SFLS){
+		ourside=(evalTeam(((SFLS_CondPlayerPosition*)token)->getTeam(),rule)==SFLS_OUR);
+	}else{
+		ourside=((CM_CondPlayerPosition*)token)->isOurSide();
+	}
+	for(Unum i=1; i<12; i++){
+		if((!SFLS && CMplayerSet.isNumMember(i)) ||
+		   (SFLS && SFLSplayerSet->isNumMember(i,rule,token,positive))){
+			if(ourside){
+				if(TeammatePositionValid(i))
+					pos=TeammateAbsolutePosition(i);
+				else{
+					continue;			
+				}
+				
+			}else{
+				if(OpponentPositionValid(i))
+					pos=OpponentAbsolutePosition(i);
+				else{
+					continue;
+				}
+					
+			}
+			if(checkWithin(pos, region,token,rule,positive)){
+				numberOfUnumsMatched++;
+				if(!positive){
+					// condition is negated.
+					// This unum matches the condition.
+					preserveTruthValue(i, SFLSplayerSet,rule,token);
+				}
+			}else{
+			  if(positive){
+			    if(SFLS){
+				preserveTruthValue(i, SFLSplayerSet,rule,token);
+			    }else{
+			    	// CM UnumSet doesn't have variables. Do nothing here.
+			    }
+			  }
+			}
+		}
+	}
+	if(numberOfUnumsMatched>=min && numberOfUnumsMatched<=max)
+		return true;
+	else
+		return false;
+}
+bool Memory::evalBallPosition(CM_Condition * token, CM_Token *rule, bool positive){
+	Region* region=((CM_CondBallPosition *)token)->getRegion();
+	Vector pos=BallAbsolutePosition();
+	return checkWithin(pos, region, token, rule, positive);
+}
+bool Memory::evalBallOwner(CM_Condition * token, CM_Token * rule, bool SFLS, bool positive){
+	Unum owner=BallPossessor();
+	SFLS_UnumSet *SFLSplayerSet=NULL;
+	UnumSet CMplayerSet;
+	if(SFLS)
+		SFLSplayerSet=((SFLS_CondBallOwner*)token)->getPlayerSet();
+	else
+		CMplayerSet=((CM_CondBallOwner*)token)->getPlayerSet();
+	if(SFLS){
+	   if((owner<0 && !(evalTeam(((SFLS_CondBallOwner*)token)->getTeam(), rule)==SFLS_OUR)) ||
+	    (owner>0 && evalTeam(((SFLS_CondBallOwner*)token)->getTeam(), rule)==SFLS_OUR)){  // correct side?
+		//MAKELOG((60,DBG_OTHER,"evalBallOwner: correct side"));
+		owner=abs(owner);
+		//cout << "SFLSPlayerSet: "; SFLSplayerSet->Print(cout); cout << endl;
+		if(SFLSplayerSet->isNumMember(owner,rule,token,positive) ||
+		 SFLSplayerSet->isNumMember(0,rule,token,positive)){   // correct player or "any"?
+			//MAKELOG((60,DBG_OTHER,"evalBallOwner: correct player"));
+			// remove all unums from the variables do/don't satisfy the cond,
+			// depending on whether the condition was negated
+			int containsVariable = SFLSplayerSet->containsVariable();
+			if(containsVariable==-1){
+				return true; // don't need to preserve
+			}
+								// variable domain
+			for(Unum notowner=1; notowner<12; notowner++){
+				if(positive){
+					if(notowner==owner) continue;
+					SFLSplayerSet->removeUnumFromVariable(rule,notowner,containsVariable);
+				}else{
+					if(notowner==owner){
+					    SFLSplayerSet->removeUnumFromVariable(rule,notowner,containsVariable);
+					}
+				}
+			}
+			return true;
+		}else{
+			return false;
+		}
+	    }else{
+		return false;
+	    }
+	}else{
+		//cout << "CMPlayerSet: "; CMplayerSet.Print(cout); cout << endl;
+		if((owner<0 && ((CM_CondBallOwner*)token)->isTheirSide()) ||
+		(owner>0 && ((CM_CondBallOwner*)token)->isOurSide())){	// correct side?
+			owner=abs(owner);
+			if(CMplayerSet.isNumMember(owner) ||
+			CMplayerSet.isNumMember(0)){			// correct player or "any"?
+				// CMplayerSet has no variables.
+				return true;
+			}else{
+				return false;
+			}
+		}else{
+			return false;
+		}
+	
+	}
+}
+bool Memory::evalPlayMode(CM_Condition * token){
+    short playmode=((CM_CondPlayMode*)token)->getPlayMode();
+    switch(playmode){
+        case  CMPM_None         : return (PlayMode==PM_No_Mode);
+        case  CMPM_BeforeKickOff    : return (PlayMode==PM_Before_Kick_Off);
+        case  CMPM_TimeOver     : return (PlayMode==PM_Time_Up);
+        case  CMPM_PlayOn       : return (PlayMode==PM_Play_On);
+        case  CMPM_KickOff_Our      : return (PlayMode==PM_My_Kick_Off);
+        case  CMPM_KickOff_Opp      : return (PlayMode==PM_Their_Kick_Off);
+        case  CMPM_KickIn_Our       : return (PlayMode==PM_My_Kick_In);
+        case  CMPM_KickIn_Opp       : return (PlayMode==PM_Their_Kick_In);
+        case  CMPM_FreeKick_Our     : return (PlayMode==PM_My_Free_Kick);
+        case  CMPM_FreeKick_Opp     : return (PlayMode==PM_Their_Free_Kick);
+        case  CMPM_CornerKick_Our   : return (PlayMode==PM_My_Corner_Kick);
+        case  CMPM_CornerKick_Opp   : return (PlayMode==PM_Their_Corner_Kick);
+        case  CMPM_GoalKick_Our     : return (PlayMode==PM_My_Goal_Kick);
+        case  CMPM_GoalKick_Opp     : return (PlayMode==PM_Their_Goal_Kick);
+        // 2do not really sure about the following:
+        case  CMPM_GoalieCatch_Our  : return (PlayMode==PM_My_Goalie_Free_Kick);
+        case  CMPM_GoalieCatch_Opp  : return (PlayMode==PM_Their_Goalie_Free_Kick);
+        // 2do 
+        case  CMPM_AfterGoal_Our    : return true;
+        case  CMPM_AfterGoal_Opp    : return true;
+
+        default:
+            MAKELOG((30,DBG_OTHER,"Error: Strange Playmode condition."));
+            return false;
+    }
+}
+
+bool Memory::evalNamed(CM_Condition * token, CM_Token *rule, bool positive){
+	// getName(), find index in namevector and return index in conditionvector
+	char * condname=((CM_CondNamed*)token)->getName();
+	short index=-1;		// index of definition
+	for(int i=0; i<(signed)ConditionNames.size(); i++){
+		if(strcmp(condname, ConditionNames[i])==0)
+			index=i;
+	}
+	if(index>-1){
+		if((signed)definedConditions.size()-1>=index)
+			return eval(definedConditions[index], rule, positive);
+		else
+			return false;
+	}else{
+		MAKELOG((20,DBG_OTHER,"Warning, found undefined condition name"));
+		return false;
+	}
+};
+
+
+bool Memory::checkWithin(Vector pos, Region * region, CM_Condition *condition,
+		CM_Token *rule, bool positive){
+	//cout << "\nCheckWithin..." ;
+	// find index in regvector and put Region into region
+	if(classNameStartsWith(region,"\"")){		// named region
+		char * regionname=((RegNamed*)region)->getName();
+		short index=-1;			// index of definition
+		for(int i=0; i<(signed)RegionNames.size(); i++){
+			if(strcmp(regionname, RegionNames[i])==0)
+				index=i;
+		}
+		if(index>-1){
+			if((signed)definedRegions.size()-1>=index)
+				region=definedRegions[index];
+			else
+				return false;
+		}else{
+			MAKELOG((20,DBG_OTHER,"Warning, found undefined region name."));
+			return false;
+		}
+	}
+	if(classNameStartsWith(region,"\'")){	// named point
+		char * regionname=((SFLS_PointNamed*)region)->getName();
+		short index=-1;			// index of definition
+		for(int i=0; i<(signed)PointNames.size(); i++){
+			if(strcmp(regionname, PointNames[i])==0)
+				index=i;
+		}
+		if(index>-1){
+			if((signed)definedPoints.size()-1>=index)
+				region=definedPoints[index];
+			else
+				return false;
+		}else{
+			MAKELOG((20,DBG_OTHER,"Warning, found undefined region name."));
+			return false;
+		}
+	}
+	if(classNameStartsWith(region,"(null"))
+		return false;
+	if(classNameStartsWith(region,"(reg")){	// Union
+		for(int i=0; i<((RegUnion*)region)->getNumRegions(); i++){
+			if(checkWithin(pos,((RegUnion*)region)->getRegion(i),
+					condition,rule,positive)) return true;
+		}
+		return false;
+	}
+	if(classNameStartsWith(region,"(arc")){
+		//cout << "Recognized arc...";
+		// get center:
+		RegPointSimple *center=evaluatePoint(((RegArc*)region)->getCenter(),
+			condition,rule,positive);
+		Vector *centerVec=new Vector(center->getX(), center->getY());
+		Arc *myArc=new Arc(*centerVec, ((RegArc*)region)->getStartRad(),
+			((RegArc*)region)->getEndRad(),((RegArc*)region)->getStartAng(),
+			((RegArc*)region)->getSpanAng());
+		
+		if(myArc->IsWithin(pos)){
+			//delete(myArc);
+			//delete(center);	// release created points from
+					// evaluatePoint()
+			//delete(centerVec);
+			return true;
+		}else{
+			//delete(myArc);
+			//delete(center);	// release created points from
+					// evaluatePoint()
+			//delete(centerVec);
+			return false;
+		}
+	}
+	if(classNameStartsWith(region,"(home")){
+		return (amInMyHomeRange());
+	}
+	// if region is a RegQuad, get all points, create a Rectangle and check
+	// if pos is .IsWithin()
+	if(classNameStartsWith(region,"(quad")){
+		RegPointSimple *pts[4];
+		RegPoint *unevaluatedPoint;
+		for(int i=0; i<4; i++){		// get all points
+			unevaluatedPoint=((RegQuad *)region)->getPt(i);
+			pts[i]=evaluatePoint(unevaluatedPoint, condition,rule,positive);
+		}
+		double left=100.0;
+		double top=100.0;
+		double right=-100.0;
+		double bottom=-100.0;
+		for(int i=0; i<4; i++){		// find borders
+			if(pts[i]->getX()<left) left=pts[i]->getX();
+			if(pts[i]->getX()>right) right=pts[i]->getX();
+			if(pts[i]->getY()<top) top=pts[i]->getY();
+			if(pts[i]->getY()>bottom) bottom=pts[i]->getY();
+		}
+		Rectangle *rectangle=new Rectangle(left,right,top,bottom);
+		//rectangle->Print();
+		//pos.Print();
+		if(rectangle->IsWithin(pos)){
+			//delete rectangle;
+			for(int i=0; i<4; i++){
+				free(pts[i]);	// release created points from
+						// evaluatePoint()
+			}
+			return true;
+		}else{
+			//delete rectangle;
+			for(int i=0; i<4; i++){
+				free(pts[i]);	// release created points from
+						// evaluatePoint()
+			}
+			return false;
+		}
+
+	}
+	MAKELOG((20,DBG_OTHER,"Error, some RegionType slipped through!"));
+	if(region==NULL) cout << "bla: Region is even null!" << endl;
+	region->Print(cout);
+	return false;
+}
+
+
+// This calculates a constant point from RegPointBall, RegPointPlayer,RegPointRelative, SFLS_Plus/MultPoint,
+// and even RegPointSimple itself.
+RegPointSimple* Memory::evaluatePoint(RegPoint *point,CM_Condition *condition,
+		CM_Token *rule, bool positive){
+	if(PrettyclassNameStartsWith(point,"Point(")){
+		return new RegPointSimple(((RegPointSimple*)point)->getX(),
+					  ((RegPointSimple*)point)->getY());
+				// Yes, we deep copy it, so we can free it like
+				// the other points afterwards.
+	}
+	if(PrettyclassNameStartsWith(point,"Point-Relative")){
+		// get point, evaluate it and add offsets.
+		RegPointSimple *fixpoint=evaluatePoint(((RegPointRelative*)point)->getPt(),
+			condition,rule,positive);
+		RegPointSimple *resultpoint=
+				new RegPointSimple(fixpoint->getX()+
+				          ((RegPointRelative*)point)->getRelX(),
+					  fixpoint->getY()+
+					  ((RegPointRelative*)point)->getRelY());
+		delete(fixpoint);	// it was from "new" in evaluatePoint()
+		return resultpoint;
+	}
+	if(classNameStartsWith(point,"(pt ball")){
+		return evalRegPointBall();
+	}
+	if(PrettyclassNameStartsWith(point,"Point-Player")){
+		return evalRegPointPlayer(((RegPointPlayer*)point), condition, rule,
+					positive);
+	}
+	if(classNameStartsWith(point,"(home")){
+		Vector homevector;
+		if(amInMyHomeRange()){
+			if(BallPositionValid()){
+				//homevector=PointInBetween(currentAdjustedPosition->Home,
+				//	BallAbsolutePosition(), currentAdjustedPosition->HomeRange);
+				// to be replaced by
+				homevector=smartAdjustedHomePos();
+			}else{
+				homevector=currentPosition->Home;
+			}
+		}else{
+			if(BallPositionValid()){
+				//homevector=currentAdjustedPosition->Home;
+				// to be replaced by
+				homevector=smartAdjustedHomePos();
+			}else{
+				homevector=currentPosition->Home;
+			}
+		} 
+		return new RegPointSimple(homevector.x, homevector.y);
+	}
+	if(classNameStartsWith(point, "(plus")){
+		// get points, evaluate them and add.
+		RegPointSimple *fixpointA=evaluatePoint(((SFLS_PlusPoint*)point)->getA(),
+			condition,rule,positive);
+		RegPointSimple *fixpointB=evaluatePoint(((SFLS_PlusPoint*)point)->getB(),
+			condition,rule,positive);
+		RegPointSimple *resultpoint=
+				new RegPointSimple(fixpointA->getX()+
+				          	   fixpointB->getX(),
+					  	   fixpointA->getY()+
+					  	   fixpointB->getY());
+		delete(fixpointA);	// it was from "new" in evaluatePoint()
+		delete(fixpointB);	// it was from "new" in evaluatePoint()
+		return resultpoint;
+	}
+	if(classNameStartsWith(point, "(mult")){
+		// get points, evaluate them and add.
+		RegPointSimple *fixpointA=evaluatePoint(((SFLS_MultPoint*)point)->getA(),
+			condition,rule,positive);
+		RegPointSimple *fixpointB=evaluatePoint(((SFLS_MultPoint*)point)->getB(),
+			condition,rule,positive);
+		RegPointSimple *resultpoint=
+				new RegPointSimple(fixpointA->getX()*
+				          	   fixpointB->getX(),
+					  	   fixpointA->getY()*
+					  	   fixpointB->getY());
+		delete(fixpointA);	// it was from "new" in evaluatePoint()
+		delete(fixpointB);	// it was from "new" in evaluatePoint()
+		return resultpoint;
+	}
+	if(classNameStartsWith(point, "\'")){
+		char * regionname=((SFLS_PointNamed*)point)->getName();
+		short index=-1;			// index of definition
+		for(int i=0; i<(signed)PointNames.size(); i++){
+			if(strcmp(regionname, PointNames[i])==0)
+				index=i;
+		}
+		if(index>-1){
+			if((signed)definedPoints.size()-1>=index)
+				return(evaluatePoint(definedPoints[index], condition, rule, positive));
+			else
+				MAKELOG((20,DBG_OTHER,"Warning, found undefined region name."));
+		}else{
+			MAKELOG((20,DBG_OTHER,"Warning, found undefined region name."));
+		}
+			
+	}
+	MAKELOG((20,DBG_OTHER,"Warning, a RegPoint-Type slipped through"));
+	return new RegPointSimple(-100,-100);
+}
+
+
+bool Memory::evalTime(CM_Condition * token, CM_Token * rule){
+	DoubleOrVariable *tokenTime=((SFLS_CondTime*)token)->getTime();
+	if(tokenTime->value!=VARIABLE_MARKER){
+		return (tokenTime->value==CurrentTime.t);
+	}else{
+		return handleDoubleVariable(tokenTime->variablename, CurrentTime.t);
+	}
+}
+
+
+bool Memory::evalGoalDiff(CM_Condition * token, CM_Token * rule){
+	DoubleOrVariable *tokenGoalDiff=((SFLS_CondGoalDiff*)token)->getGoalDiff();
+	if(tokenGoalDiff->value!=VARIABLE_MARKER){
+		return (((int)tokenGoalDiff->value)==(MyScore-TheirScore));
+	}else{
+		return handleDoubleVariable(tokenGoalDiff->variablename,
+				(MyScore-TheirScore));
+	}
+}
+
+
+bool Memory::evalBallVelocity(CM_Condition * token, CM_Token * rule){
+	DoubleOrVariable *tokenBallVelocity=((SFLS_CondBallVelocity*)token)->getBallVelocity();
+	if(tokenBallVelocity->value!=VARIABLE_MARKER){
+		return (((double)tokenBallVelocity->value)==BallSpeed());
+	}else{
+		return handleDoubleVariable(tokenBallVelocity->variablename, BallSpeed());
+	}
+}
+
+
+bool Memory::evalAction(CM_Condition * token, CM_Token * rule, bool positive){
+	MAKELOG((20,DBG_OTHER,"Warning, SFLS_CondAction not yet supported."));
+	return true;
+	// 2do
+	// Brauchen wir das?
+	// markl: Ist Spieler an einer fuer diese Aktion typischen Position?
+	// dribble: Hat der Spieler seit einigen Zyklen den Ball und bewegt sich?
+	// pass: Bewegt sich der Ball vom Spieler zu dem anderen Spieler?
+	// ...
+}
+
+bool Memory::evalState(CM_Condition * token){
+	string statename=((SFLS_CondState*)token)->getName();
+	string statevalue=((SFLS_CondState*)token)->getValue();
+	
+	// look for name in the vector and check corresponding value in the other vector:
+	for(int i=0; i<(signed)SFLS_StateNames.size(); i++){
+		if(strcmp(statename.c_str(), SFLS_StateNames[i].c_str())==0){
+			// found variablename, now check the value:
+			if(strcmp(statevalue.c_str(), SFLS_StateValues[i].c_str())==0)
+				return true;
+			else
+				return false;
+		}
+	}
+	// Statename was not found:
+	MAKELOG((20,DBG_OTHER,"Warning, checking SFLS_State that has not been introduced."));
+	return false;
+}
+
+// 2do: Stamina
+bool Memory::evalStamina(CM_Condition * token, CM_Token * rule, bool positive){
+	MAKELOG((20,DBG_OTHER,"evalStamina not yet supported."));
+	return true;
+}
+
+
+// lazy: We assume (ballcatchable) will only be used by the goalie
+bool Memory::evalBallCatchable(CM_Condition * token, CM_Token * rule, bool positive){
+	if(!CP_goalie){
+		MAKELOG((20,DBG_OTHER,"Warning, (ballcatchable) used in field player."));
+		return false;
+	}
+	if(!BallPositionValid()) return false;
+	return BallCatchable();
+}
+
+
+
+// check if player is faster to ball than every player of the other team:
+bool Memory::evalBallInterceptable(CM_Condition * token, CM_Token * rule, bool positive){
+	if(!BallPositionValid()) return false;
+	
+	
+	short team = evalTeam(((SFLS_CondBallInterceptable*)token)->getTeam(), rule);
+	short cyclesOtherTeamToBall;	// how many cycles does the fastest player of
+					// the other team need to go to the ball?
+	SFLS_UnumSet * playerset=((SFLS_CondBallInterceptable*)token)->getPlayerSet();
+	bool result=false;
+	
+	int fastest;
+	if(team==SFLS_OUR){
+		fastest=FastestOpponentToBall();
+		if(fastest==0 || !OpponentPositionValid(fastest) || !OpponentVelocityValid(fastest)){
+			return true;	// no info about opponent
+		}
+		cyclesOtherTeamToBall = OpponentInterceptionNumberCycles(fastest);
+	}else if(team==SFLS_OPP){
+		fastest=FastestTeammateToBall();
+		if(fastest==0 || !TeammatePositionValid(fastest) || !TeammateVelocityValid(fastest)){
+			return true;	// no info about opponent
+		}
+		cyclesOtherTeamToBall = TeammateInterceptionNumberCycles(fastest);
+	}else{
+		return false;	// evalTeam() failed
+	}
+
+	// which teammates are faster than the fastest opponent?
+	for(int i=1; i<12; i++){		
+		if((team==SFLS_OUR && TeammatePositionValid(i) &&TeammateVelocityValid(i)&&
+			 TeammateInterceptionAble(i) && TeammateInterceptionNumberCycles(i)<cyclesOtherTeamToBall) ||
+		   (team==SFLS_OPP && OpponentPositionValid(i)&& OpponentVelocityValid(i)&&
+		   	OpponentInterceptionAble(i) && OpponentInterceptionNumberCycles(i)<cyclesOtherTeamToBall)){
+			int containsVariable=playerset->containsVariable();
+			if(playerset->isNumMember(i, rule, token,true,positive)){
+				// Condition is true.
+				result=true;
+				// but maintain variables, too.
+				if(!positive && containsVariable!=-1)
+					playerset->removeUnumFromVariable(rule,i,containsVariable);
+			}else{
+				// maintain variables.
+				if(positive && containsVariable!=-1)
+					playerset->removeUnumFromVariable(rule,i,containsVariable);
+			}
+		}
+	}
+	return result;
+	
+}
+
+
+bool Memory::evalEqualUnum(CM_Condition * token, CM_Token * rule, bool positive){
+	bool xConstant=((SFLS_CondEqualUnum*)token)->isXConstant();
+	bool yConstant=((SFLS_CondEqualUnum*)token)->isYConstant();
+
+	int ruleIndex=-1;
+	if(!xConstant || !yConstant){
+		ruleIndex=variableSetIndexOfRule(rule);
+		
+		if(ruleIndex==-1){
+			MAKELOG((40,DBG_OTHER,"Warning, comparing unintroduced UnumVariables."));
+			return false;
+		}
+	}
+
+			
+	int xName;
+	int yName;
+	int indexOfX=0;
+	int indexOfY=0;
+	UnumSet * unumSetX=NULL;
+	UnumSet * unumSetY=NULL;
+	// minor 2do: No doubt, this needs an esthetical efficiency boost:
+	if(!xConstant){
+		xName=((SFLS_CondEqualUnum*)token)->getVariableX()->getVariableName();
+		indexOfX=UnumVariableSets[ruleIndex]->getIndexOfName(xName);
+		unumSetX=UnumVariableSets[ruleIndex]->unumsets[indexOfX];
+	}
+	if(!yConstant){
+		yName=((SFLS_CondEqualUnum*)token)->getVariableY()->getVariableName();	
+		indexOfY=UnumVariableSets[ruleIndex]->getIndexOfName(yName);
+		unumSetY=UnumVariableSets[ruleIndex]->unumsets[indexOfY];
+	}	
+	
+	
+	if(indexOfX==-1 || indexOfY==-1){
+		MAKELOG((20,DBG_OTHER,"Warning, trying to compare at least one unintroduced UnumVariable."));
+		return false;
+	}
+
+	if(xConstant && yConstant){
+	 	// both are constant 
+		return (((SFLS_CondEqualUnum*)token)->getConstantX() ==
+			((SFLS_CondEqualUnum*)token)->getConstantY());
+	}else if(!xConstant && !yConstant){
+	   	// both are variables
+		// set both variables to the intersection of both
+		// if the intersection is empty, return false;
+		bool atleastonematched=false;
+		bool inX, inY;
+		for(int i=0; i<12; i++){
+			inX=unumSetX->isNumMember(i);
+			inY=unumSetY->isNumMember(i);
+			if(inX && inY){
+				atleastonematched=true; // ok, it's in both
+			}else if(!inX && positive){	// only if cond is not negated
+				unumSetY->removeNum(i);	// remove it from X
+			}else if(!inY && positive){
+				unumSetX->removeNum(i); // remove it from Y
+			}
+		}
+		if(atleastonematched)
+			return true;
+		else
+			return false;
+	}else if(!xConstant){
+		// only x is a variable
+		// if y is in X, set X to y, otherwise return false
+		Unum y=((SFLS_CondEqualUnum*)token)->getConstantY();
+		if(unumSetX->isNumMember(y)){
+			unumSetX->clear();
+			unumSetX->addNum(y);
+			return true;
+		}else{
+			return false;
+		}
+	}else if(!yConstant){
+		// only y is a variable	
+		// if x is in Y, set Y to x, otherwise return false
+		Unum x=((SFLS_CondEqualUnum*)token)->getConstantY();
+		if(unumSetY->isNumMember(x)){
+			unumSetY->clear();
+			unumSetY->addNum(x);
+			return true;
+		}else{
+			return false;				
+		}
+	}
+	return false; // never reached
+}
+
+
+void Memory::introduceVariableWithValue(int variablename, double recentvalue){
+	if(DoubleVariableNames.size()!=DoubleVariableValues.size()){
+		MAKELOG((20,DBG_OTHER,"Warning, DoubleVariables mismatch."));
+		return;
+	}
+	for(int i=0; i<(signed)DoubleVariableNames.size(); i++){
+		if(DoubleVariableNames[i]==variablename){
+			MAKELOG((20,DBG_OTHER,"Warning, trying to introduce variable twice."));
+			return;
+		}
+	}
+	DoubleVariableNames.push_back(variablename);
+	DoubleVariableValues.push_back(recentvalue);
+}
+
+
+
+#define COMPARE_EQUAL 1
+#define COMPARE_GREATER 2
+#define COMPARE_LESS 3
+
+
+
+bool Memory::evalComparationOfDoubleVariables(DoubleOrVariable *x, DoubleOrVariable *y,
+	short mode, bool positive){
+	
+	double xval=0;
+	double yval=0;
+	bool xfound=false;
+	bool yfound=false;
+	if(!(x->isVariable())){
+		xval=x->value;
+	}else{
+		for(int i=0; i<(signed)DoubleVariableNames.size(); i++){
+			if(DoubleVariableNames[i]==x->variablename){
+				xval=DoubleVariableValues[i];
+				xfound=true;
+			}
+		}
+	}
+	if(!(y->isVariable())){
+		yval=y->value;
+	}else{
+		for(int i=0; i<(signed)DoubleVariableNames.size(); i++){
+			if(DoubleVariableNames[i]==y->variablename){
+				yval=DoubleVariableValues[i];
+				yfound=true;
+			}
+		}
+	}
+	if(xfound&&yfound){
+		switch(mode){
+			case COMPARE_EQUAL : return (xval==yval);
+			case COMPARE_LESS : return (xval<yval);
+			case COMPARE_GREATER : return (xval>yval);
+			default:
+				MAKELOG((20,DBG_OTHER,"Warning, wrong comparation mode."));
+				return false;
+		}
+	}else{
+		if(!xfound && !yfound){
+			MAKELOG((20,DBG_OTHER,"Warning, two unbound variables are being compared."));
+			return true;
+		}
+		if(mode==COMPARE_LESS || mode==COMPARE_GREATER){
+			MAKELOG((20,DBG_OTHER,"Warning, one variable is unbound."));
+			return true;
+		}
+		if(positive){
+			// exactly one of the two variables was not introduced yet.
+			// introduce it with the value of the other.
+			if(!xfound)
+				introduceVariableWithValue(y->variablename, xval);
+			else
+				introduceVariableWithValue(x->variablename, yval);
+			return true;
+		}
+		return false; // never reached
+	}
+}
+
+bool Memory::evalEqual(CM_Condition * token, bool positive){
+	DoubleOrVariable *x=((SFLS_CondEqual*)token)->getX();
+	DoubleOrVariable *y=((SFLS_CondEqual*)token)->getY();
+	return evalComparationOfDoubleVariables(x,y,COMPARE_EQUAL,positive);
+}
+
+bool Memory::evalLess(CM_Condition * token, bool positive){
+	DoubleOrVariable *x=((SFLS_CondLess*)token)->getX();
+	DoubleOrVariable *y=((SFLS_CondLess*)token)->getY();
+	return evalComparationOfDoubleVariables(x,y,COMPARE_LESS,positive);
+}
+bool Memory::evalGreater(CM_Condition * token, bool positive){
+	DoubleOrVariable *x=((SFLS_CondGreater*)token)->getX();
+	DoubleOrVariable *y=((SFLS_CondGreater*)token)->getY();
+	return evalComparationOfDoubleVariables(x,y,COMPARE_GREATER, positive);
+}
+
+
+
+// ################## SFLS: evaluation of functions ###########
+
+/** This gets a pointer to the condition in which the SFLS_Function was used, because
+  * in case of a variable we need to check for which unums the condition is true,
+  * alreadyIn is also only used for variables (all Unums that are in alreadyIn will not
+  * be included in the variable).
+  * Returns -1 if there is no value for a variable that satifies the condition
+  */
+// 2do cache Functions like (FastestPlayerToBall our)
+Unum Memory::evalFunction(SFLS_Function * function, CM_Condition * condition,
+			CM_Token * rule, UnumSet *alreadyIn, bool positive){
+	short team;
+	short teamTarget=-1; // only used in two types
+	// in case of FastestPlayerToPlayer and ClosestPlayerToPlayer we also need to
+	// evaluate team_target:
+	if(function->getType()==FastestPlayerToPlayer ||
+	   function->getType()==ClosestPlayerToPlayer){
+	   	teamTarget=evalTeam(function->getTeamtarget(), rule);
+	}
+	Vector posOfPlayer;	// only used for Closest/FastestPlayerToPlayer
+				
+	// now check the different functiontypes:
+	Unum aplayer;
+	Unum oneUnum=-1;
+	int foundrule=-1;	// used for variables
+	int foundname=-1;	// used for variables
+
+	int passresult;
+
+	switch(function->getType()){
+		case Variable:
+			// was variable introduced already?
+			for(int set=0; set<(signed)UnumVariableSets.size(); set++){
+				// find Variable Set for this rule first
+				if(UnumVariableSets[set]->getRule()==rule){
+					foundrule=set;
+					// now find variable name in that set
+					for(int n=0; n<(signed)UnumVariableSets[set]->names.size();n++){
+						if(UnumVariableSets[set]->names[n]== function->getVariableName()){
+							foundname=n;
+							break;
+						}
+					}
+					break;
+				} // if getRule()==rule
+			}// for set	
+			
+			if(foundname==-1){
+				// we have to introduce the variable
+				if(foundrule==-1){
+					// we also have to create a VariableSet for this rule
+					UnumVariableSets.push_back(new SFLS_UnumVariableSet(rule));
+					foundrule=UnumVariableSets.size()-1;
+				}
+				// which unums have to be in the Variable?
+				UnumSet *unumSetToBeAdded = new UnumSet();
+				for(int checkunum=1; checkunum<12; checkunum++){
+					// Unums that were mentioned explicitly will not be in the Variable:
+			  		if(alreadyIn->isNumMember(checkunum)) continue;
+	 			  	if(evalConditionForJustOneUnum(checkunum, condition)){
+						if(positive){
+							if(oneUnum==-1) oneUnum=checkunum;
+							unumSetToBeAdded->addNum(checkunum);
+						}
+					}else{
+						if(!positive){
+							if(oneUnum==-1) oneUnum=checkunum;
+							unumSetToBeAdded->addNum(checkunum);
+						}
+					}
+				}
+		 		UnumVariableSets[foundrule]->names.push_back(function->getVariableName());
+		 		UnumVariableSets[foundrule]->unumsets.push_back(unumSetToBeAdded);
+				return oneUnum;
+			}else{
+				// variable has already been introduced
+				// for each unum in the variable, check if the condition is true.
+				for(int checkunum=1; checkunum<12; checkunum++){
+					if(UnumVariableSets[foundrule]->unumsets[foundname]->isNumMember(checkunum)){
+						// evaluate condition for checkunum
+			  			if(alreadyIn->isNumMember(checkunum)) continue;
+	 			  		if(evalConditionForJustOneUnum(checkunum, condition)){
+							if(!positive){
+								// remove checkunum
+								UnumVariableSets[foundrule]->removeUnumFromVar(checkunum,
+									UnumVariableSets[foundrule]->names[foundname]);
+							}else{
+								if(oneUnum==-1) oneUnum=checkunum;
+							}
+						}else{
+							if(positive){
+								// remove checkunum
+								UnumVariableSets[foundrule]->removeUnumFromVar(checkunum,
+									UnumVariableSets[foundrule]->names[foundname]);
+							}else{
+								if(oneUnum==-1) oneUnum=checkunum;
+							}
+						}
+
+					}
+				
+				}
+				return oneUnum;
+			}
+		
+		case FastestPlayerToBall:
+			team=evalTeam(function->getTeam(), rule);
+			if(team==-1 || !BallPositionValid()){
+				return -1;
+			}
+			if(team==SFLS_OUR){
+				return FastestTeammateToBall();
+			}else if(team==SFLS_OPP){
+				return FastestOpponentToBall();
+			}else{
+				int mate=FastestTeammateToBall();
+				int opponent=FastestOpponentToBall();
+				if(!mate || !opponent) return -1;
+				if(
+				   TeammateInterceptionNumberCycles(mate) < 
+     				   OpponentInterceptionNumberCycles(opponent))
+				   	return mate;
+				else
+					return opponent;
+			}
+			
+		case ClosestPlayerToBall:
+			team=evalTeam(function->getTeam(), rule);
+			if(team==-1 || !BallPositionValid()) return -1;
+			if(team==SFLS_OUR){
+				return ClosestTeammateToBall();
+			}else if(team==SFLS_OPP){
+				return ClosestOpponentToBall();
+			}
+			else {
+			   int opponent=ClosestOpponentToBall();
+			   if(opponent<1) return ClosestTeammateToBall();
+			   if(ClosestTeammateToBallDistance()<OpponentDistanceToBall(opponent))
+				return ClosestTeammateToBall();
+			   else
+				return ClosestOpponentToBall();
+			}
+			return -1;
+		case ClosestPlayerToPlayer:
+		case FastestPlayerToPlayer:
+			// teamtarget has been assigned already
+			team=evalTeam(function->getTeam(), rule);
+			// we will look only at the first unum in the set:
+			aplayer=(function->getUnumSet())->getOneByOne(0,condition,rule,positive);
+			if(aplayer==-1) return -1;
+			if(teamTarget==SFLS_OUR){
+				if(!TeammatePositionValid(aplayer)) return -1;
+				posOfPlayer=TeammateAbsolutePosition(aplayer);
+			}else if(teamTarget==SFLS_OPP){
+				if(!OpponentPositionValid(aplayer)) return -1;
+				posOfPlayer=OpponentAbsolutePosition(aplayer);
+			}else{
+				MAKELOG((20,DBG_OTHER,"Warning, BOTH used as teamtarget."));
+				return -1;
+			}
+			// now find fastest teammate/opponent/both to posOfPlayer:
+			// 2do There is no FastestTeammateToPos(), is there????
+			if(team==SFLS_OUR){
+				return ClosestTeammateTo(posOfPlayer);
+			}else if(team==SFLS_OPP){
+				return ClosestOpponentTo(posOfPlayer);			
+			}else{
+				// BOTH, in this case TeamOfFastestPlayerToPlayer
+				// has to be used, too.
+				int closestMate=ClosestTeammateTo(posOfPlayer);
+				int closestOpp= ClosestOpponentTo(posOfPlayer);
+				if(closestMate<1 && closestOpp<1)
+					return -1;
+				if(closestMate<1)
+					return closestOpp;
+				if(closestOpp<1)
+					return closestMate;
+				if(OpponentDistanceTo(closestOpp, posOfPlayer)<
+				   TeammateDistanceTo(closestMate,posOfPlayer))
+				   	return closestOpp;
+				else
+					return closestMate;
+			}
+			return -1;
+
+		case BestPassPartner:
+			// 2do still igrnoring TEAM and UNUMSET
+			//team=evalTeam(function->getTeam(), rule);
+			//aplayer=(function->getUnumSet())->getOneByOne(0,condition,rule,positive);
+			//return bestPasspartner(team,aplayer);
+			
+			passresult=bestPasspartner(NULL);
+			if(passresult==0) passresult=-1;
+			return passresult;
+		case BestDeckPartner:
+			// 2do still igrnoring TEAM and UNUMSET
+			// team=evalTeam(function->getTeam(), rule);
+			// aplayer=(function->getUnumSet())->getOneByOne(0,condition,rule,positive);
+			
+           		return getOpponentToCover();	
+		default:
+			MAKELOG((20,DBG_OTHER,"Missed an UnumFunctionType."));
+			return -1;
+	}
+	return -1;	// never reached
+}
+
+// returns -1 if BallPosition is not valid or any other error occured
+// otherwise it returns SFLS_OPP or SFLS_OUR or SFLS_BOTH or SFLS_Team->getSide()
+short Memory::evalTeam(SFLS_Team *team, CM_Token * rule){
+	int mate, opponent;
+	switch(team->getType()){
+		case Constant		  : 
+					return team->getSide();
+		case TeamOfFastestPlayerToBall  :
+					if(BallPositionValid()){ 
+					   	mate=FastestTeammateToBall();
+					   	opponent=FastestOpponentToBall();
+						if(!mate || !opponent) return -1;
+					}else{
+						return -1;
+					}
+					if(
+					   TeammateInterceptionNumberCycles(mate) < 
+	     				   OpponentInterceptionNumberCycles(opponent))
+					   	return SFLS_OUR;
+					else
+						return SFLS_OPP;
+					break;
+		case TeamOfClosestPlayerToBall  :
+					if(BallPositionValid()){ 
+					   	opponent=ClosestOpponentToBall();
+						if(!opponent) return -1;
+					}else{
+						return -1;
+					}
+					if(
+					   ClosestTeammateToBallDistance() < 
+	     				   OpponentDistanceToBall(opponent))
+					   	return SFLS_OUR;
+					else
+						return SFLS_OPP;
+					break;		
+		case TeamOfFastestPlayerToPlayer:
+					// TEAM UNUM
+					// 2do
+					MAKELOG((20,DBG_OTHER,"Warning, TeamOfFastestPlayerToPlayer not yet supported "));
+					return -1;
+		case TeamOfClosestPlayerToPlayer:
+					// TEAM UNUM
+					// 2do
+					MAKELOG((20,DBG_OTHER,"Warning, TeamOfClosestPlayerToPlayer not yet supported "));
+					return -1;
+		default:	MAKELOG((20,DBG_OTHER,"Non-existing SFLS_TeamFunctionType"));
+				return -1;
+	}
+	return -1;	// should never be reached
+}
+
+
+
+/** clones a condition and checks it for a specified Unum */
+bool Memory::evalConditionForJustOneUnum(short unum, CM_Condition * condition){
+	CM_Condition *newcondition=NULL;	// condition will be deep copied in here
+	UnumSet *setWithOne=new UnumSet();
+	setWithOne->addNum(unum);
+	SFLS_UnumSet *SFLS_setWithOne=new SFLS_UnumSet();
+	SFLS_setWithOne->addNum(unum);
+
+	bool condresult;
+	switch(condition->getType()){
+	  	case CMC_PlayerPosition		:
+			newcondition=new CM_CondPlayerPosition(
+				((CM_CondPlayerPosition*)condition)->isOurSide(),
+				*setWithOne,
+				((CM_CondPlayerPosition*)condition)->getMinMatch(),
+				((CM_CondPlayerPosition*)condition)->getMaxMatch(),
+				((CM_CondPlayerPosition*)condition)->getRegion()
+			);
+			condresult=eval((CM_CondPlayerPosition*)newcondition, NULL);
+			break;
+  		case CMC_BallOwner		:
+			newcondition=new CM_CondBallOwner(
+				((CM_CondBallOwner*)condition)->isOurSide(),
+				*setWithOne		
+			);
+			condresult=eval((CM_CondBallOwner*)newcondition, NULL);
+			break;
+		case SFLSC_PlayerPosition	:
+			newcondition=new SFLS_CondPlayerPosition(
+				((SFLS_CondPlayerPosition*)condition)->getTeam(),
+				SFLS_setWithOne,
+				((SFLS_CondPlayerPosition*)condition)->getMinMatch(),
+				((SFLS_CondPlayerPosition*)condition)->getMaxMatch(),
+				((SFLS_CondPlayerPosition*)condition)->getRegion()
+			);
+			condresult=eval((SFLS_CondPlayerPosition*)newcondition, NULL);
+			break;
+		case SFLSC_BallOwner		:
+			newcondition = new SFLS_CondBallOwner(((SFLS_CondBallOwner*)condition)->getTeam(),
+						SFLS_setWithOne);
+			condresult=eval((SFLS_CondBallOwner*)newcondition, NULL);
+			break;
+  		case SFLSC_Action		:
+			newcondition=new SFLS_CondAction(
+				((SFLS_CondAction*)condition)->getTeam(),
+				SFLS_setWithOne,
+				((SFLS_CondAction*)condition)->getAction()
+			);
+			condresult=eval((SFLS_CondAction*)newcondition, NULL);
+			break;
+  		case SFLSC_Stamina		:
+			newcondition= new SFLS_CondStamina(
+				((SFLS_CondAction*)condition)->getTeam(),
+				SFLS_setWithOne,
+				((SFLS_CondStamina*)condition)->getLevel()			
+			);
+			condresult=eval((SFLS_CondStamina*)newcondition, NULL);
+			break;
+  		case SFLSC_BallInterceptable 	:
+			newcondition= new SFLS_CondBallInterceptable(
+				((SFLS_CondBallInterceptable*)condition)->getTeam(),
+				SFLS_setWithOne			
+			);
+			condresult=eval((SFLS_CondBallInterceptable*)newcondition, NULL);
+			break;
+		default:
+			MAKELOG((20,DBG_OTHER,"called evalConditionForJustOneUnum() with condition that has no Unum-attribute."));
+			delete(newcondition);
+			return false;
+	}
+	delete(setWithOne);	
+	// delete(newcondition); // Memory leak! 2do
+	return condresult;
+}
+
+
+
+
+
+
+/** check whether the variable has already been introduced. Check if it matches the
+  * recent value in this case. Otherwise introduce the variable and store its value.
+  */
+bool Memory::handleDoubleVariable(int variablename,double recentvalue){
+		
+	if(DoubleVariableNames.size()!=DoubleVariableValues.size()){
+		// sanity check
+		MAKELOG((20,DBG_OTHER,"Warning, different number of variable names and values!"));
+		return false;
+	}
+	// check if VariableName is already defined:
+	for(int i=0; i<(signed)DoubleVariableNames.size(); i++){
+		if(DoubleVariableNames[i]==variablename){
+			// Variable has already been introduced and thus has a
+			// value. Check if this value corresponds to our time.
+			return (DoubleVariableValues[i]==recentvalue);
+		}
+	}
+	
+	// introduce variable and set the value:
+	introduceVariableWithValue(variablename, recentvalue);
+	return true;
+}
+
+
+/** This method removes an unum from the possible variable values, if unum is only
+  * mentioned in the Variable of an SFLS_UnumSet.
+  */
+void Memory::preserveTruthValue(Unum unum, SFLS_UnumSet *SFLSplayerSet, CM_Token * rule,
+			CM_Condition * token){
+	// not totally correct:
+	if(!SFLSplayerSet->isNumMember(unum,rule,token,false,true)){
+	  // i is only in the Variable, so remove this unum
+	  SFLSplayerSet->removeUnumFromVariable(rule,unum,-1);
+	}else{
+	  // it's ok. Interpretation is: If ANY of the players in
+	  // unumSet are in that region. do nothing here.
+	}
+}
+
+
+/** returns the index of the UnumVariableSet for a given rule */
+int Memory::variableSetIndexOfRule(CM_Token * rule){
+	for(int i=0; i<(signed)UnumVariableSets.size(); i++){
+		if(UnumVariableSets[i]->getRule()==rule) return i;
+	}
+	return -1;	// not found
+}
+
+
+
+
+// ################# Auxiliary classe ##########
+
+void SFLS_UnumVariableSet::addUnumToVar(int aname, Unum unum){
+	int index=getIndexOfName(aname);
+	if(index==-1){
+		MAKELOG((20,DBG_OTHER,"Warning, trying to add unum to non-existing variable."));
+		return;
+	}
+	unumsets[index]->addNum(index);
+}
+
+void SFLS_UnumVariableSet::removeUnumFromVar(int aname, Unum unum){
+	int index=getIndexOfName(aname);
+	if(index==-1){
+		MAKELOG((20,DBG_OTHER,"Warning, trying to remove unum from non-existing variable."));
+		return;
+	}
+	unumsets[index]->removeNum(unum);
+}
+
+
+// returns -1 if aname is not in the VariableSet
+int SFLS_UnumVariableSet::getIndexOfName(int aname){
+	for(int i=0; i<(signed)names.size(); i++){
+		if(names[i]==aname) return i;
+	}
+	return -1;
+}
+
+
+void SFLS_UnumVariableSet::reset(){
+	names.clear();
+	for(int i=0; i<(signed)unumsets.size(); i++){
+		delete(unumsets[i]);	// 2do is this correct?
+	}
+	unumsets.clear();
+}
+
+
+
+// evaluate relative Points and so from region.h (Coach-language based)
+// returns -100,-100 if player position is not valid.
+RegPointSimple * Memory::evalRegPointBall(){
+	if(!BallPositionValid())
+		return new RegPointSimple(-100,-100);
+	return new RegPointSimple(BallAbsolutePosition().x, BallAbsolutePosition().y);
+}
+
+
+// returns -100,-100 if player position is not valid.
+RegPointSimple * Memory::evalRegPointPlayer(Region *pointPlayer,
+			CM_Condition * condition, CM_Token* rule, bool positive){
+	// 2do There is no need to update eventual Variables in the UnumSet, is there?
+	short team;
+	if(classNameStartsWith(pointPlayer,"(pt player"))
+		team=evalTeam(((SFLS_RegPointPlayer*)pointPlayer)->getTeam(), rule);
+	else
+		team=(((RegPointPlayer*)pointPlayer)->isOurSide()?SFLS_OUR:SFLS_OPP);
+		
+	// now get first entry of SFLS_UnumSet.
+	// if there are SFLS_Functions in it, take the first.
+	int evaluatedPlayer=-1;	// unum of the player whose position we will consider
+	if(classNameStartsWith(pointPlayer,"(pt player") && 
+	   ((SFLS_RegPointPlayer*)pointPlayer)->getPlayerSet()->getSFLS_Functions()->size()>0){
+		UnumSet * removeMe=new UnumSet();	// an empty UnumSet
+		SFLS_Function* func=
+		  	(*(((SFLS_RegPointPlayer*)pointPlayer)->getPlayerSet()->getSFLS_Functions()))[0];
+		evaluatedPlayer=evalFunction( func, condition, rule,removeMe,positive);
+		delete(removeMe);
+	}else{
+		// take any unum that matches.
+		if(!classNameStartsWith(pointPlayer,"(pt player"))
+			evaluatedPlayer=(((RegPointPlayer*)pointPlayer)->getNum());
+		else{
+		     for(int i=1; i<12; i++)
+			if(((UnumSet*)((SFLS_RegPointPlayer*)pointPlayer)->getPlayerSet())->isNumMember(i)){
+				evaluatedPlayer=i;
+				break;
+			}
+		}
+	}
+	if(evaluatedPlayer==-1){
+		MAKELOG((20,DBG_OTHER,"Warning, using RegPointPlayer in a strange way."));
+		return new RegPointSimple(-100,-100);
+	}
+	// now get position of player evaluatedPlayer in team
+	if(team!=SFLS_OUR){
+		if(!OpponentPositionValid(evaluatedPlayer))
+			return new RegPointSimple(-100,-100);
+		return new RegPointSimple(OpponentAbsolutePosition(evaluatedPlayer).x,
+					OpponentAbsolutePosition(evaluatedPlayer).y);
+	}else{
+		if(!TeammatePositionValid(evaluatedPlayer))
+			return new RegPointSimple(-100,-100);
+		return new RegPointSimple(TeammateAbsolutePosition(evaluatedPlayer).x,
+					TeammateAbsolutePosition(evaluatedPlayer).y);
+	}
+
+}
+
+
+

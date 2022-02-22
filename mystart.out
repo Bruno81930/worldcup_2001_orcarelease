@@ -1,0 +1,37 @@
+#!/bin/bash
+#Execution File
+
+export host="localhost"
+export teamname="Osna_BallByters"
+export programname="orcaclient"
+
+set simulator_step = 30
+
+echo "Running with the following parameters"
+echo "Hostname: " $host
+echo "Teamname: " $teamname
+echo "Program: " $programname
+echo "Sim_step: " $simulator_step
+
+./$programname -goalie -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
+./$programname -file client.conf -file orca.conf -file server.conf -host $host -team_name $teamname &
+sleep 1
